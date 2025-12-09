@@ -125,7 +125,7 @@ def track_command(func):
         CHAT_IDS.add(message.chat.id)
         if message.from_user:
             USER_IDS.add(message.from_user.id)
-        return await func(message, *args, **kwargs)
+        return await func(message)
     return wrapper
 
 class RobloxAPI:
