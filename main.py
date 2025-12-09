@@ -53,8 +53,10 @@ CHAT_IDS: Set[int] = set()
 USER_IDS: Set[int] = set()
 USER_LANG: Dict[int, str] = {}
 
+
 def esc(t: str) -> str:
     return t.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+
 
 def parse_ids(raw: str, max_count=20):
     ids: List[int] = []
@@ -65,8 +67,10 @@ def parse_ids(raw: str, max_count=20):
             break
     return ids
 
+
 def parse_iso8601(s: str) -> dt.datetime:
     return dt.datetime.fromisoformat(s.replace("Z", "+00:00"))
+
 
 def detect_language(code: Optional[str]) -> str:
     if not code:
@@ -75,6 +79,7 @@ def detect_language(code: Optional[str]) -> str:
     if c.startswith("ru"):
         return "ru"
     return "en"
+
 
 def get_lang(message: Message) -> str:
     if not message.from_user:
@@ -86,6 +91,7 @@ def get_lang(message: Message) -> str:
     USER_LANG[uid] = lang
     return lang
 
+
 def get_lang_cb(cb: CallbackQuery) -> str:
     if not cb.from_user:
         return DEFAULT_LANG
@@ -96,8 +102,10 @@ def get_lang_cb(cb: CallbackQuery) -> str:
     USER_LANG[uid] = lang
     return lang
 
+
 def get_lang_by_user_id(uid: int) -> str:
     return USER_LANG.get(uid, DEFAULT_LANG)
+
 
 def format_uptime(seconds: float) -> str:
     secs = int(seconds)
@@ -118,19 +126,20 @@ def format_uptime(seconds: float) -> str:
         parts.append(f"{secs}s")
     return " ".join(parts)
 
+
 def track_command(func):
-    async def wrapper(message: Message, *args, **kwargs):
+    async def wrapper(message: Message, command: CommandObject = None, *args, **kwargs):
         global TOTAL_COMMANDS
         TOTAL_COMMANDS += 1
 
         CHAT_IDS.add(message.chat.id)
-
         if message.from_user:
             USER_IDS.add(message.from_user.id)
 
-        return await func(message)
+        return await func(message, command)
 
     return wrapper
+
 
 class RobloxAPI:
     def __init__(self):
@@ -316,10 +325,12 @@ class RobloxAPI:
         url = f"https://badges.roblox.com/v1/users/{uid}/badges/awarded-dates?{urlencode({'badgeIds': badge_id})}"
         return await self.req("GET", url)
 
+
 roblox = RobloxAPI()
 
 ROLI_SESSION: Optional[aiohttp.ClientSession] = None
 ROLI_ITEMS_CACHE: Optional[Dict[str, list]] = None
+
 
 async def roli_ensure():
     global ROLI_SESSION
@@ -329,6 +340,7 @@ async def roli_ensure():
             headers={"User-Agent": "Mozilla/5.0 (RBLXScanBot/1.0)"}
         )
     return ROLI_SESSION
+
 
 async def roli_get(url: str):
     s = await roli_ensure()
@@ -341,6 +353,7 @@ async def roli_get(url: str):
             raise RuntimeError(f"Rolimons HTTP {r.status}: {data}")
         return data
 
+
 async def roli_get_items():
     global ROLI_ITEMS_CACHE
     if ROLI_ITEMS_CACHE is not None:
@@ -351,6 +364,7 @@ async def roli_get_items():
     else:
         ROLI_ITEMS_CACHE = data["items"]
     return ROLI_ITEMS_CACHE
+
 
 async def compose_limiteds_text(uid: int, lang: str) -> str:
     user = await roblox.get_user_by_id(uid)
@@ -413,6 +427,7 @@ async def compose_limiteds_text(uid: int, lang: str) -> str:
             header += f"\n⚠️ Rolimons issue: <code>{esc(roli_err)}</code>\n"
     return header + "\n" + "\n".join(lines)
 
+
 def user_profile_keyboard(uid: int):
     return InlineKeyboardMarkup(
         inline_keyboard=[
@@ -437,9 +452,10 @@ def user_profile_keyboard(uid: int):
         ]
     )
 
+
 @dp.message(Command("start"))
 @track_command
-async def cmd_start(message: Message):
+async def cmd_start(message, command: CommandObject):
     lang = get_lang(message)
     if lang == "ru":
         text = (
@@ -450,7 +466,7 @@ async def cmd_start(message: Message):
             "/limiteds <code>имя</code>\n→ Все лимитки с RAP/Value\n\n"
             "/rolimons <code>имя</code>\n→ Статистика Rolimons\n\n"
             "Полный список: /help\n"
-            "Язык: /"
+            "Язык: /language"
         )
         kb = InlineKeyboardMarkup(
             inline_keyboard=[
@@ -483,9 +499,10 @@ async def cmd_start(message: Message):
         )
     await message.answer(text, reply_markup=kb)
 
+
 @dp.message(Command("help"))
 @track_command
-async def cmd_help(message: Message):
+async def cmd_help(message, command: CommandObject):
     lang = get_lang(message)
     if lang == "ru":
         text = (
@@ -563,18 +580,19 @@ async def cmd_help(message: Message):
         )
     await message.answer(text)
 
+
 @dp.message(Command("user"))
 @track_command
-async def cmd_user(message: Message):
+async def cmd_user(message, command: CommandObject):
     lang = get_lang(message)
     name = (command.args or "").strip()
     if not name:
         if lang == "ru":
             return await message.answer(
-                "/user <Имя>\n→ Показать детали профиля по имени\nПример: <code>/user d45wn</code>"
+                "/user &lt;Имя&gt;\n→ Показать детали профиля по имени\nПример: <code>/user d45wn</code>"
             )
         return await message.answer(
-            "/user <Username>\n→ Display details about a Roblox user\nExample: <code>/user d45wn</code>"
+            "/user &lt;Username&gt;\n→ Display details about a Roblox user\nExample: <code>/user d45wn</code>"
         )
     try:
         user = await roblox.get_user_details_by_username(name)
@@ -688,19 +706,20 @@ async def cmd_user(message: Message):
         return await message.answer_photo(thumb, caption=text, reply_markup=kb)
     return await message.answer(text, reply_markup=kb)
 
+
 @dp.message(Command("id"))
 @track_command
-async def cmd_id(message: Message):
+async def cmd_id(message, command: CommandObject):
     lang = get_lang(message)
-    parts = message.text.split(maxsplit=1) 
+    parts = message.text.split(maxsplit=1)
     arg = parts[1].strip() if len(parts) > 1 else ""
     if not arg.isdigit():
         if lang == "ru":
             return await message.answer(
-                "/id <UserID>\n→ Показать детали профиля по ID\nПример: <code>/id 790144111</code>"
+                "/id &lt;UserID&gt;\n→ Показать детали профиля по ID\nПример: <code>/id 790144111</code>"
             )
         return await message.answer(
-            "/id <UserID>\n→ Display details about a Roblox user by ID\nExample: <code>/id 790144111</code>"
+            "/id &lt;UserID&gt;\n→ Display details about a Roblox user by ID\nExample: <code>/id 790144111</code>"
         )
     uid = int(arg)
     try:
@@ -746,18 +765,19 @@ async def cmd_id(message: Message):
         return await message.answer_photo(thumb, caption=txt, reply_markup=kb)
     return await message.answer(txt, reply_markup=kb)
 
+
 @dp.message(Command("username"))
 @track_command
-async def cmd_username(message: Message):
+async def cmd_username(message, command: CommandObject):
     lang = get_lang(message)
     u = (command.args or "").strip()
     if not u:
         if lang == "ru":
             return await message.answer(
-                "/username <Имя>\n→ Проверить, занят ли юзернейм\nПример: <code>/username d45wn</code>"
+                "/username &lt;Имя&gt;\n→ Проверить, занят ли юзернейм\nПример: <code>/username d45wn</code>"
             )
         return await message.answer(
-            "/username <Username>\n→ Check if a username is available\nExample: <code>/username d45wn</code>"
+            "/username &lt;Username&gt;\n→ Check if a username is available\nExample: <code>/username d45wn</code>"
         )
     user = await roblox.get_user_by_username(u)
     if user:
@@ -774,18 +794,19 @@ async def cmd_username(message: Message):
         return await message.answer(f"✅ <code>{esc(u)}</code> выглядит свободным.")
     return await message.answer(f"✅ <code>{esc(u)}</code> seems available.")
 
+
 @dp.message(Command("displayname"))
 @track_command
-async def cmd_displayname(message: Message):
+async def cmd_displayname(message, command: CommandObject):
     lang = get_lang(message)
     d = (command.args or "").strip()
     if not d:
         if lang == "ru":
             return await message.answer(
-                "/displayname <Имя>\n→ Поиск по display name\nПример: <code>/displayname Darkss</code>"
+                "/displayname &lt;Имя&gt;\n→ Поиск по display name\nПример: <code>/displayname Darkss</code>"
             )
         return await message.answer(
-            "/displayname <Name>\n→ Search by display name\nExample: <code>/displayname Darkss</code>"
+            "/displayname &lt;Name&gt;\n→ Search by display name\nExample: <code>/displayname Darkss</code>"
         )
     results = await roblox.search_displayname(d)
     if not results:
@@ -816,18 +837,19 @@ async def cmd_displayname(message: Message):
             )
     await message.answer("\n".join(lines))
 
+
 @dp.message(Command("copyid"))
 @track_command
-async def cmd_copyid(message: Message):
+async def cmd_copyid(message, command: CommandObject):
     lang = get_lang(message)
     name = (command.args or "").strip()
     if not name:
         if lang == "ru":
             return await message.answer(
-                "/copyid <Имя>\n→ Получить ID пользователя\nПример: <code>/copyid d45wn</code>"
+                "/copyid &lt;Имя&gt;\n→ Получить ID пользователя\nПример: <code>/copyid d45wn</code>"
             )
         return await message.answer(
-            "/copyid <Username>\n→ Get user ID quickly\nExample: <code>/copyid d45wn</code>"
+            "/copyid &lt;Username&gt;\n→ Get user ID quickly\nExample: <code>/copyid d45wn</code>"
         )
     u = await roblox.get_user_by_username(name)
     if not u:
@@ -842,18 +864,19 @@ async def cmd_copyid(message: Message):
         f"🆔 ID of <code>{esc(u['name'])}</code> = <code>{u['id']}</code>"
     )
 
+
 @dp.message(Command("idtousername"))
 @track_command
-async def cmd_idtousername(message: Message):
+async def cmd_idtousername(message, command: CommandObject):
     lang = get_lang(message)
     ids = parse_ids((command.args or ""), 50)
     if not ids:
         if lang == "ru":
             return await message.answer(
-                "/idtousername <ID1 ID2 ...>\n→ Конвертировать ID в имена\nПример: <code>/idtousername 1 2 3</code>"
+                "/idtousername &lt;ID1 ID2 ...&gt;\n→ Конвертировать ID в имена\nПример: <code>/idtousername 1 2 3</code>"
             )
         return await message.answer(
-            "/idtousername <ID1 ID2 ...>\n→ Convert IDs to usernames\nExample: <code>/idtousername 1 2 3</code>"
+            "/idtousername &lt;ID1 ID2 ...&gt;\n→ Convert IDs to usernames\nExample: <code>/idtousername 1 2 3</code>"
         )
     info = await roblox.get_users_by_ids(ids)
     if lang == "ru":
@@ -873,18 +896,19 @@ async def cmd_idtousername(message: Message):
                 lines.append(f"{i} → not found")
     await message.answer("\n".join(lines))
 
+
 @dp.message(Command("banned"))
 @track_command
-async def cmd_banned(message: Message):
+async def cmd_banned(message, command: CommandObject):
     lang = get_lang(message)
     ids = parse_ids((command.args or ""), 20)
     if not ids:
         if lang == "ru":
             return await message.answer(
-                "/banned <ID1 ID2 ...>\n→ Проверить статус бана\nПример: <code>/banned 1 2 3</code>"
+                "/banned &lt;ID1 ID2 ...&gt;\n→ Проверить статус бана\nПример: <code>/banned 1 2 3</code>"
             )
         return await message.answer(
-            "/banned <ID1 ID2 ...>\n→ Check banned status\nExample: <code>/banned 1 2 3</code>"
+            "/banned &lt;ID1 ID2 ...&gt;\n→ Check banned status\nExample: <code>/banned 1 2 3</code>"
         )
     if lang == "ru":
         lines = ["⛔️ <b>Статус бана:</b>"]
@@ -901,18 +925,19 @@ async def cmd_banned(message: Message):
                 lines.append(f"{i}: not found")
     await message.answer("\n".join(lines))
 
+
 @dp.message(Command("accountage"))
 @track_command
-async def cmd_accountage(message: Message):
+async def cmd_accountage(message, command: CommandObject):
     lang = get_lang(message)
     name = (command.args or "").strip()
     if not name:
         if lang == "ru":
             return await message.answer(
-                "/accountage <Имя>\n→ Показать возраст аккаунта\nПример: <code>/accountage d45wn</code>"
+                "/accountage &lt;Имя&gt;\n→ Показать возраст аккаунта\nПример: <code>/accountage d45wn</code>"
             )
         return await message.answer(
-            "/accountage <Username>\n→ Show account age\nExample: <code>/accountage d45wn</code>"
+            "/accountage &lt;Username&gt;\n→ Show account age\nExample: <code>/accountage d45wn</code>"
         )
     u = await roblox.get_user_details_by_username(name)
     if not u:
@@ -935,18 +960,19 @@ async def cmd_accountage(message: Message):
             f"Age: <code>{days}</code> days (~<code>{days/365:.2f}</code> years)"
         )
 
+
 @dp.message(Command("lastonline"))
 @track_command
-async def cmd_lastonline(message: Message):
+async def cmd_lastonline(message, command: CommandObject):
     lang = get_lang(message)
     name = (command.args or "").strip()
     if not name:
         if lang == "ru":
             return await message.answer(
-                "/lastonline <Имя>\n→ Последний онлайн\nПример: <code>/lastonline d45wn</code>"
+                "/lastonline &lt;Имя&gt;\n→ Последний онлайн\nПример: <code>/lastonline d45wn</code>"
             )
         return await message.answer(
-            "/lastonline <Username>\n→ Show last online time\nExample: <code>/lastonline d45wn</code>"
+            "/lastonline &lt;Username&gt;\n→ Show last online time\nExample: <code>/lastonline d45wn</code>"
         )
     u = await roblox.get_user_by_username(name)
     if not u:
@@ -974,18 +1000,19 @@ async def cmd_lastonline(message: Message):
             f"Last Online: <b>{last}</b>"
         )
 
+
 @dp.message(Command("avatar"))
 @track_command
-async def cmd_avatar(message: Message):
+async def cmd_avatar(message, command: CommandObject):
     lang = get_lang(message)
     name = (command.args or "").strip()
     if not name:
         if lang == "ru":
             return await message.answer(
-                "/avatar <Имя>\n→ Аватар пользователя\nПример: <code>/avatar d45wn</code>"
+                "/avatar &lt;Имя&gt;\n→ Аватар пользователя\nПример: <code>/avatar d45wn</code>"
             )
         return await message.answer(
-            "/avatar <Username>\n→ Send avatar render\nExample: <code>/avatar d45wn</code>"
+            "/avatar &lt;Username&gt;\n→ Send avatar render\nExample: <code>/avatar d45wn</code>"
         )
     u = await roblox.get_user_by_username(name)
     if not u:
@@ -1002,18 +1029,19 @@ async def cmd_avatar(message: Message):
     else:
         await message.answer_photo(url, caption=f"🧍 Avatar of <b>{esc(u['name'])}</b>")
 
+
 @dp.message(Command("headshot"))
 @track_command
-async def cmd_headshot(message: Message):
+async def cmd_headshot(message, command: CommandObject):
     lang = get_lang(message)
     name = (command.args or "").strip()
     if not name:
         if lang == "ru":
             return await message.answer(
-                "/headshot <Имя>\n→ Headshot аватара\nПример: <code>/headshot d45wn</code>"
+                "/headshot &lt;Имя&gt;\n→ Headshot аватара\nПример: <code>/headshot d45wn</code>"
             )
         return await message.answer(
-            "/headshot <Username>\n→ Send avatar headshot\nExample: <code>/headshot d45wn</code>"
+            "/headshot &lt;Username&gt;\n→ Send avatar headshot\nExample: <code>/headshot d45wn</code>"
         )
     u = await roblox.get_user_by_username(name)
     if not u:
@@ -1030,18 +1058,19 @@ async def cmd_headshot(message: Message):
     else:
         await message.answer_photo(url, caption=f"🙂 Headshot of <b>{esc(u['name'])}</b>")
 
+
 @dp.message(Command("bust"))
 @track_command
-async def cmd_bust(message: Message):
+async def cmd_bust(message, command: CommandObject):
     lang = get_lang(message)
     name = (command.args or "").strip()
     if not name:
         if lang == "ru":
             return await message.answer(
-                "/bust <Имя>\n→ Поясное изображение аватара\nПример: <code>/bust d45wn</code>"
+                "/bust &lt;Имя&gt;\n→ Поясное изображение аватара\nПример: <code>/bust d45wn</code>"
             )
         return await message.answer(
-            "/bust <Username>\n→ Send avatar bust\nExample: <code>/bust d45wn</code>"
+            "/bust &lt;Username&gt;\n→ Send avatar bust\nExample: <code>/bust d45wn</code>"
         )
     u = await roblox.get_user_by_username(name)
     if not u:
@@ -1058,18 +1087,19 @@ async def cmd_bust(message: Message):
     else:
         await message.answer_photo(url, caption=f"🧍‍♂️ Bust of <b>{esc(u['name'])}</b>")
 
+
 @dp.message(Command("assetid"))
 @track_command
-async def cmd_assetid(message: Message):
+async def cmd_assetid(message, command: CommandObject):
     lang = get_lang(message)
     raw = (command.args or "").strip()
     if not raw.isdigit():
         if lang == "ru":
             return await message.answer(
-                "/assetid <AssetID>\n→ Информация о предмете\nПример: <code>/assetid 1029025</code>"
+                "/assetid &lt;AssetID&gt;\n→ Информация о предмете\nПример: <code>/assetid 1029025</code>"
             )
         return await message.answer(
-            "/assetid <AssetID>\n→ Show item info\nExample: <code>/assetid 1029025</code>"
+            "/assetid &lt;AssetID&gt;\n→ Show item info\nExample: <code>/assetid 1029025</code>"
         )
     aid = int(raw)
     info = await roblox.get_asset_info(aid)
@@ -1110,18 +1140,19 @@ async def cmd_assetid(message: Message):
         return await message.answer_photo(icon, caption=text)
     return await message.answer(text)
 
+
 @dp.message(Command("asseticon"))
 @track_command
-async def cmd_asseticon(message: Message):
+async def cmd_asseticon(message, command: CommandObject):
     lang = get_lang(message)
     raw = (command.args or "").strip()
     if not raw.isdigit():
         if lang == "ru":
             return await message.answer(
-                "/asseticon <AssetID>\n→ Иконка предмета\nПример: <code>/asseticon 1029025</code>"
+                "/asseticon &lt;AssetID&gt;\n→ Иконка предмета\nПример: <code>/asseticon 1029025</code>"
             )
         return await message.answer(
-            "/asseticon <AssetID>\n→ Show item icon\nExample: <code>/asseticon 1029025</code>"
+            "/asseticon &lt;AssetID&gt;\n→ Show item icon\nExample: <code>/asseticon 1029025</code>"
         )
     aid = int(raw)
     icon = await roblox.get_asset_icon(aid)
@@ -1134,18 +1165,19 @@ async def cmd_asseticon(message: Message):
     else:
         await message.answer_photo(icon, caption=f"🎴 Asset <b>{aid}</b>")
 
+
 @dp.message(Command("groupid"))
 @track_command
-async def cmd_groupid(message: Message):
+async def cmd_groupid(message, command: CommandObject):
     lang = get_lang(message)
     raw = (command.args or "").strip()
     if not raw.isdigit():
         if lang == "ru":
             return await message.answer(
-                "/groupid <GroupID>\n→ Инфо о группе по ID\nПример: <code>/groupid 35700808</code>"
+                "/groupid &lt;GroupID&gt;\n→ Инфо о группе по ID\nПример: <code>/groupid 35700808</code>"
             )
         return await message.answer(
-            "/groupid <GroupID>\n→ Group info by ID\nExample: <code>/groupid 35700808</code>"
+            "/groupid &lt;GroupID&gt;\n→ Group info by ID\nExample: <code>/groupid 35700808</code>"
         )
     gid = int(raw)
     g = await roblox.get_group_by_id(gid)
@@ -1177,18 +1209,19 @@ async def cmd_groupid(message: Message):
             txt += f"\n\n<b>📜 Description:</b>\n{desc}"
     await message.answer(txt)
 
+
 @dp.message(Command("group"))
 @track_command
-async def cmd_group(message: Message):
+async def cmd_group(message, command: CommandObject):
     lang = get_lang(message)
     name = (command.args or "").strip()
     if not name:
         if lang == "ru":
             return await message.answer(
-                "/group <Название>\n→ Поиск группы по названию\nПример: <code>/group Darkss Group</code>"
+                "/group &lt;Название&gt;\n→ Поиск группы по названию\nПример: <code>/group Darkss Group</code>"
             )
         return await message.answer(
-            "/group <Name>\n→ Search group by name\nExample: <code>/group Darkss Group</code>"
+            "/group &lt;Name&gt;\n→ Search group by name\nExample: <code>/group Darkss Group</code>"
         )
     results = await roblox.search_group_by_name(name)
     if not results:
@@ -1219,18 +1252,19 @@ async def cmd_group(message: Message):
             txt += f"\n\n<b>📜 Description:</b>\n{desc}"
     await message.answer(txt)
 
+
 @dp.message(Command("groupicon"))
 @track_command
-async def cmd_groupicon(message: Message):
+async def cmd_groupicon(message, command: CommandObject):
     lang = get_lang(message)
     raw = (command.args or "").strip()
     if not raw.isdigit():
         if lang == "ru":
             return await message.answer(
-                "/groupicon <GroupID>\n→ Открыть страницу группы\nПример: <code>/groupicon 35700808</code>"
+                "/groupicon &lt;GroupID&gt;\n→ Открыть страницу группы\nПример: <code>/groupicon 35700808</code>"
             )
         return await message.answer(
-            "/groupicon <GroupID>\n→ Open group page\nExample: <code>/groupicon 35700808</code>"
+            "/groupicon &lt;GroupID&gt;\n→ Open group page\nExample: <code>/groupicon 35700808</code>"
         )
     gid = int(raw)
     if lang == "ru":
@@ -1244,18 +1278,19 @@ async def cmd_groupicon(message: Message):
             f"Group: https://www.roblox.com/groups/{gid}"
         )
 
+
 @dp.message(Command("groups"))
 @track_command
-async def cmd_groups(message: Message):
+async def cmd_groups(message, command: CommandObject):
     lang = get_lang(message)
     u = (command.args or "").strip()
     if not u:
         if lang == "ru":
             return await message.answer(
-                "/groups <Имя>\n→ Показать группы пользователя\nПример: <code>/groups d45wn</code>"
+                "/groups &lt;Имя&gt;\n→ Показать группы пользователя\nПример: <code>/groups d45wn</code>"
             )
         return await message.answer(
-            "/groups <Username>\n→ Show user groups\nExample: <code>/groups d45wn</code>"
+            "/groups &lt;Username&gt;\n→ Show user groups\nExample: <code>/groups d45wn</code>"
         )
     base = await roblox.get_user_by_username(u)
     if not base:
@@ -1280,18 +1315,19 @@ async def cmd_groups(message: Message):
         )
     await message.answer("\n".join(lines))
 
+
 @dp.message(Command("friends"))
 @track_command
-async def cmd_friends(message: Message):
+async def cmd_friends(message, command: CommandObject):
     lang = get_lang(message)
     u = (command.args or "").strip()
     if not u:
         if lang == "ru":
             return await message.answer(
-                "/friends <Имя>\n→ Показать друзей\nПример: <code>/friends d45wn</code>"
+                "/friends &lt;Имя&gt;\n→ Показать друзей\nПример: <code>/friends d45wn</code>"
             )
         return await message.answer(
-            "/friends <Username>\n→ Show user's friends\nExample: <code>/friends d45wn</code>"
+            "/friends &lt;Username&gt;\n→ Show user's friends\nExample: <code>/friends d45wn</code>"
         )
     base = await roblox.get_user_by_username(u)
     if not base:
@@ -1313,18 +1349,19 @@ async def cmd_friends(message: Message):
         lines.append(f"• {name} (<code>{fid}</code>)")
     await message.answer("\n".join(lines))
 
+
 @dp.message(Command("followers"))
 @track_command
-async def cmd_followers(message: Message):
+async def cmd_followers(message, command: CommandObject):
     lang = get_lang(message)
     u = (command.args or "").strip()
     if not u:
         if lang == "ru":
             return await message.answer(
-                "/followers <Имя>\n→ Показать подписчиков\nПример: <code>/followers d45wn</code>"
+                "/followers &lt;Имя&gt;\n→ Показать подписчиков\nПример: <code>/followers d45wn</code>"
             )
         return await message.answer(
-            "/followers <Username>\n→ Show user's followers\nExample: <code>/followers d45wn</code>"
+            "/followers &lt;Username&gt;\n→ Show user's followers\nExample: <code>/followers d45wn</code>"
         )
     base = await roblox.get_user_by_username(u)
     if not base:
@@ -1346,18 +1383,19 @@ async def cmd_followers(message: Message):
         lines.append(f"• {name} (<code>{fid}</code>)")
     await message.answer("\n".join(lines))
 
+
 @dp.message(Command("followings"))
 @track_command
-async def cmd_followings(message: Message):
+async def cmd_followings(message, command: CommandObject):
     lang = get_lang(message)
     u = (command.args or "").strip()
     if not u:
         if lang == "ru":
             return await message.answer(
-                "/followings <Имя>\n→ Показать, на кого подписан пользователь\nПример: <code>/followings d45wn</code>"
+                "/followings &lt;Имя&gt;\n→ Показать, на кого подписан пользователь\nПример: <code>/followings d45wn</code>"
             )
         return await message.answer(
-            "/followings <Username>\n→ Show who user follows\nExample: <code>/followings d45wn</code>"
+            "/followings &lt;Username&gt;\n→ Show who user follows\nExample: <code>/followings d45wn</code>"
         )
     base = await roblox.get_user_by_username(u)
     if not base:
@@ -1379,20 +1417,21 @@ async def cmd_followings(message: Message):
         lines.append(f"• {name} (<code>{fid}</code>)")
     await message.answer("\n".join(lines))
 
+
 @dp.message(Command("limiteds"))
 @track_command
-async def cmd_limiteds(message: Message):
+async def cmd_limiteds(message, command: CommandObject):
     lang = get_lang(message)
     u = (command.args or "").strip()
     if not u:
         if lang == "ru":
             return await message.answer(
-                "/limiteds <Имя>\n→ Просканировать все лимитки (RAP/Value)\n"
+                "/limiteds &lt;Имя&gt;\n→ Просканировать все лимитки (RAP/Value)\n"
                 "Пример: <code>/limiteds d45wn</code>\n"
                 "Покажет список всех limited-предметов пользователя."
             )
         return await message.answer(
-            "/limiteds <Username>\n→ Scan all RAP/Value items\n"
+            "/limiteds &lt;Username&gt;\n→ Scan all RAP/Value items\n"
             "Example: <code>/limiteds d45wn</code>\n"
             "Shows a full list of user's limiteds."
         )
@@ -1404,18 +1443,19 @@ async def cmd_limiteds(message: Message):
     text = await compose_limiteds_text(base["id"], lang)
     await message.answer(text)
 
+
 @dp.message(Command("rolimons"))
 @track_command
-async def cmd_rolimons(message: Message):
+async def cmd_rolimons(message, command: CommandObject):
     lang = get_lang(message)
     u = (command.args or "").strip()
     if not u:
         if lang == "ru":
             return await message.answer(
-                "/rolimons <Имя>\n→ RAP/Value и прочее с Rolimons\nПример: <code>/rolimons d45wn</code>"
+                "/rolimons &lt;Имя&gt;\n→ RAP/Value и прочее с Rolimons\nПример: <code>/rolimons d45wn</code>"
             )
         return await message.answer(
-            "/rolimons <Username>\n→ RAP/Value and more from Rolimons\nExample: <code>/rolimons d45wn</code>"
+            "/rolimons &lt;Username&gt;\n→ RAP/Value and more from Rolimons\nExample: <code>/rolimons d45wn</code>"
         )
     base = await roblox.get_user_by_username(u)
     if not base:
@@ -1471,18 +1511,19 @@ async def cmd_rolimons(message: Message):
         )
     await message.answer(text)
 
+
 @dp.message(Command("devex"))
 @track_command
-async def cmd_devex(message: Message):
+async def cmd_devex(message, command: CommandObject):
     lang = get_lang(message)
     raw = (command.args or "").strip()
     if not raw.isdigit():
         if lang == "ru":
             return await message.answer(
-                "/devex <Robux>\n→ Приблизительная сумма в USD\nПример: <code>/devex 100000</code>"
+                "/devex &lt;Robux&gt;\n→ Приблизительная сумма в USD\nПример: <code>/devex 100000</code>"
             )
         return await message.answer(
-            "/devex <Robux>\n→ Approximate cash value in USD\nExample: <code>/devex 100000</code>"
+            "/devex &lt;Robux&gt;\n→ Approximate cash value in USD\nExample: <code>/devex 100000</code>"
         )
     r = int(raw)
     usd = r * USD_PER_ROBUX
@@ -1495,18 +1536,19 @@ async def cmd_devex(message: Message):
             f"💵 <code>{r:,}</code> R$ ≈ <b>${usd:,.2f}</b> USD (approx.)"
         )
 
+
 @dp.message(Command("devexcad"))
 @track_command
-async def cmd_devexcad(message: Message):
+async def cmd_devexcad(message, command: CommandObject):
     lang = get_lang(message)
     raw = (command.args or "").strip()
     if not raw.isdigit():
         if lang == "ru":
             return await message.answer(
-                "/devexcad <Robux>\n→ Приблизительная сумма в CAD\nПример: <code>/devexcad 100000</code>"
+                "/devexcad &lt;Robux&gt;\n→ Приблизительная сумма в CAD\nПример: <code>/devexcad 100000</code>"
             )
         return await message.answer(
-            "/devexcad <Robux>\n→ Approximate cash value in CAD\nExample: <code>/devexcad 100000</code>"
+            "/devexcad &lt;Robux&gt;\n→ Approximate cash value in CAD\nExample: <code>/devexcad 100000</code>"
         )
     r = int(raw)
     cad = (r * USD_PER_ROBUX) * USD_TO_CAD
@@ -1519,9 +1561,10 @@ async def cmd_devexcad(message: Message):
             f"💵 <code>{r:,}</code> R$ ≈ <b>${cad:,.2f}</b> CAD (approx.)"
         )
 
+
 @dp.message(Command("language"))
 @track_command
-async def cmd_language(message: Message):
+async def cmd_language(message, command: CommandObject):
     uid = message.from_user.id
 
     parts = message.text.split(maxsplit=1)
@@ -1559,18 +1602,19 @@ async def cmd_language(message: Message):
 
     await message.answer(text, reply_markup=kb)
 
+
 @dp.message(Command("names"))
 @track_command
-async def cmd_names(message: Message):
+async def cmd_names(message, command: CommandObject):
     lang = get_lang(message)
     name = (command.args or "").strip()
     if not name:
         if lang == "ru":
             return await message.answer(
-                "/names <Имя>\n→ История юзернеймов\nПример: <code>/names d45wn</code>"
+                "/names &lt;Имя&gt;\n→ История юзернеймов\nПример: <code>/names d45wn</code>"
             )
         return await message.answer(
-            "/names <Username>\n→ Show username history\nExample: <code>/names d45wn</code>"
+            "/names &lt;Username&gt;\n→ Show username history\nExample: <code>/names d45wn</code>"
         )
     base = await roblox.get_user_by_username(name)
     if not base:
@@ -1602,18 +1646,19 @@ async def cmd_names(message: Message):
             lines.append(f"• {uname}")
     await message.answer("\n".join(lines))
 
+
 @dp.message(Command("verified"))
 @track_command
-async def cmd_verified(message: Message):
+async def cmd_verified(message, command: CommandObject):
     lang = get_lang(message)
     name = (command.args or "").strip()
     if not name:
         if lang == "ru":
             return await message.answer(
-                "/verified <Имя>\n→ Статус верификации\nПример: <code>/verified d45wn</code>"
+                "/verified &lt;Имя&gt;\n→ Статус верификации\nПример: <code>/verified d45wn</code>"
             )
         return await message.answer(
-            "/verified <Username>\n→ Show verification status\nExample: <code>/verified d45wn</code>"
+            "/verified &lt;Username&gt;\n→ Show verification status\nExample: <code>/verified d45wn</code>"
         )
     base = await roblox.get_user_details_by_username(name)
     if not base:
@@ -1646,19 +1691,20 @@ async def cmd_verified(message: Message):
         text += f"\nProfile: https://www.roblox.com/users/{uid}/profile"
     await message.answer(text)
 
+
 @dp.message(Command("owned"))
 @track_command
-async def cmd_owned(message: Message):
+async def cmd_owned(message, command: CommandObject):
     lang = get_lang(message)
     args = (command.args or "").split()
     if len(args) < 2 or not args[1].isdigit():
         if lang == "ru":
             return await message.answer(
-                "/owned <Имя> <AssetID>\n→ Проверить, владеет ли пользователь предметом\n"
+                "/owned &lt;Имя&gt; &lt;AssetID&gt;\n→ Проверить, владеет ли пользователь предметом\n"
                 "Пример: <code>/owned d45wn 1029025</code>"
             )
         return await message.answer(
-            "/owned <Username> <AssetID>\n→ Check if user owns an item\n"
+            "/owned &lt;Username&gt; &lt;AssetID&gt;\n→ Check if user owns an item\n"
             "Example: <code>/owned d45wn 1029025</code>"
         )
     username = args[0]
@@ -1705,19 +1751,20 @@ async def cmd_owned(message: Message):
                 f"❌ <b>{esc(base['name'])}</b> does not own asset <code>{asset_id}</code>."
             )
 
+
 @dp.message(Command("obtained"))
 @track_command
-async def cmd_obtained(message: Message):
+async def cmd_obtained(message, command: CommandObject):
     lang = get_lang(message)
     args = (command.args or "").split()
     if len(args) < 2 or not args[1].isdigit():
         if lang == "ru":
             return await message.answer(
-                "/obtained <Имя> <BadgeID>\n→ Когда пользователь получил игровой бейдж\n"
+                "/obtained &lt;Имя&gt; &lt;BadgeID&gt;\n→ Когда пользователь получил игровой бейдж\n"
                 "Пример: <code>/obtained d45wn 1234567890</code>"
             )
         return await message.answer(
-            "/obtained <Username> <BadgeID>\n→ When user obtained a player badge\n"
+            "/obtained &lt;Username&gt; &lt;BadgeID&gt;\n→ When user obtained a player badge\n"
             "Example: <code>/obtained d45wn 1234567890</code>"
         )
     username = args[0]
@@ -1757,18 +1804,19 @@ async def cmd_obtained(message: Message):
             f"<code>{dt_str}</code>"
         )
 
+
 @dp.message(Command("template"))
 @track_command
-async def cmd_template(message: Message):
+async def cmd_template(message, command: CommandObject):
     lang = get_lang(message)
     raw = (command.args or "").strip()
     if not raw.isdigit():
         if lang == "ru":
             return await message.answer(
-                "/template <AssetID>\n→ Ссылка на ресурс/текстуру/mesh\nПример: <code>/template 1029025</code>"
+                "/template &lt;AssetID&gt;\n→ Ссылка на ресурс/текстуру/mesh\nПример: <code>/template 1029025</code>"
             )
         return await message.answer(
-            "/template <AssetID>\n→ Asset/texture/mesh URL\nExample: <code>/template 1029025</code>"
+            "/template &lt;AssetID&gt;\n→ Asset/texture/mesh URL\nExample: <code>/template 1029025</code>"
         )
     aid = int(raw)
     asset_url = f"https://www.roblox.com/asset/?id={aid}"
@@ -1789,18 +1837,19 @@ async def cmd_template(message: Message):
         )
     await message.answer(text)
 
+
 @dp.message(Command("offsales"))
 @track_command
-async def cmd_offsales(message: Message):
+async def cmd_offsales(message, command: CommandObject):
     lang = get_lang(message)
     name = (command.args or "").strip()
     if not name:
         if lang == "ru":
             return await message.answer(
-                "/offsales <Имя>\n→ Оффсейл-предметы (ограничено API)\nПример: <code>/offsales d45wn</code>"
+                "/offsales &lt;Имя&gt;\n→ Оффсейл-предметы (ограничено API)\nПример: <code>/offsales d45wn</code>"
             )
         return await message.answer(
-            "/offsales <Username>\n→ Offsale catalog items (API-limited)\nExample: <code>/offsales d45wn</code>"
+            "/offsales &lt;Username&gt;\n→ Offsale catalog items (API-limited)\nExample: <code>/offsales d45wn</code>"
         )
     if lang == "ru":
         await message.answer(
@@ -1813,18 +1862,20 @@ async def cmd_offsales(message: Message):
             "Once a stable data source is available, this command will be upgraded."
         )
 
+
 @dp.message(Command("links"))
 @track_command
-async def cmd_links(message: Message):
+async def cmd_links(message, command: CommandObject):
     lang = get_lang(message)
     if lang == "ru":
         await message.answer("🔗 Скоро здесь появятся ссылки на канал и другие ресурсы RBLXScan.")
     else:
         await message.answer("🔗 Soon: links to the main channel and other RBLXScan resources will appear here.")
 
+
 @dp.message(Command("botstats"))
 @track_command
-async def cmd_botstats(message: Message):
+async def cmd_botstats(message, command):
     lang = get_lang(message)
     if not message.from_user or message.from_user.id != OWNER_ID:
         if lang == "ru":
@@ -1864,6 +1915,7 @@ async def cmd_botstats(message: Message):
         )
     await message.answer(text)
 
+
 @dp.callback_query(F.data == "help_open")
 async def cb_help_open(cb: CallbackQuery):
     lang = get_lang_cb(cb)
@@ -1888,6 +1940,7 @@ async def cb_help_open(cb: CallbackQuery):
     await cb.message.answer(txt)
     await cb.answer()
 
+
 @dp.callback_query(F.data.startswith("roli_stats:"))
 async def cb_roli_stats(cb: CallbackQuery):
     lang = get_lang_cb(cb)
@@ -1898,6 +1951,7 @@ async def cb_roli_stats(cb: CallbackQuery):
     text = await compose_limiteds_text(uid, lang)
     await cb.message.answer(text)
     await cb.answer()
+
 
 @dp.callback_query(F.data.startswith("set_lang:"))
 async def cb_set_lang(cb: CallbackQuery):
@@ -1911,6 +1965,7 @@ async def cb_set_lang(cb: CallbackQuery):
     else:
         await cb.message.answer("Bot language set to: 🇬🇧 English.")
     await cb.answer()
+
 
 async def main():
     await bot.set_my_commands(
@@ -1961,6 +2016,7 @@ async def main():
     )
     print("Bot running...")
     await dp.start_polling(bot)
+
 
 if __name__ == "__main__":
     asyncio.run(main())
