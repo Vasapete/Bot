@@ -122,10 +122,14 @@ def track_command(func):
     async def wrapper(message: Message, *args, **kwargs):
         global TOTAL_COMMANDS
         TOTAL_COMMANDS += 1
+
         CHAT_IDS.add(message.chat.id)
+
         if message.from_user:
             USER_IDS.add(message.from_user.id)
+
         return await func(message)
+
     return wrapper
 
 class RobloxAPI:
@@ -446,7 +450,7 @@ async def cmd_start(message: Message):
             "/limiteds <code>имя</code>\n→ Все лимитки с RAP/Value\n\n"
             "/rolimons <code>имя</code>\n→ Статистика Rolimons\n\n"
             "Полный список: /help\n"
-            "Язык: /language"
+            "Язык: /"
         )
         kb = InlineKeyboardMarkup(
             inline_keyboard=[
@@ -561,7 +565,7 @@ async def cmd_help(message: Message):
 
 @dp.message(Command("user"))
 @track_command
-async def cmd_user(message: Message, command: CommandObject):
+async def cmd_user(message: Message):
     lang = get_lang(message)
     name = (command.args or "").strip()
     if not name:
@@ -686,9 +690,10 @@ async def cmd_user(message: Message, command: CommandObject):
 
 @dp.message(Command("id"))
 @track_command
-async def cmd_id(message: Message, command: CommandObject):
+async def cmd_id(message: Message):
     lang = get_lang(message)
-    arg = (command.args or "").strip()
+    parts = message.text.split(maxsplit=1) 
+    arg = parts[1].strip() if len(parts) > 1 else ""
     if not arg.isdigit():
         if lang == "ru":
             return await message.answer(
@@ -743,7 +748,7 @@ async def cmd_id(message: Message, command: CommandObject):
 
 @dp.message(Command("username"))
 @track_command
-async def cmd_username(message: Message, command: CommandObject):
+async def cmd_username(message: Message):
     lang = get_lang(message)
     u = (command.args or "").strip()
     if not u:
@@ -771,7 +776,7 @@ async def cmd_username(message: Message, command: CommandObject):
 
 @dp.message(Command("displayname"))
 @track_command
-async def cmd_displayname(message: Message, command: CommandObject):
+async def cmd_displayname(message: Message):
     lang = get_lang(message)
     d = (command.args or "").strip()
     if not d:
@@ -813,7 +818,7 @@ async def cmd_displayname(message: Message, command: CommandObject):
 
 @dp.message(Command("copyid"))
 @track_command
-async def cmd_copyid(message: Message, command: CommandObject):
+async def cmd_copyid(message: Message):
     lang = get_lang(message)
     name = (command.args or "").strip()
     if not name:
@@ -839,7 +844,7 @@ async def cmd_copyid(message: Message, command: CommandObject):
 
 @dp.message(Command("idtousername"))
 @track_command
-async def cmd_idtousername(message: Message, command: CommandObject):
+async def cmd_idtousername(message: Message):
     lang = get_lang(message)
     ids = parse_ids((command.args or ""), 50)
     if not ids:
@@ -870,7 +875,7 @@ async def cmd_idtousername(message: Message, command: CommandObject):
 
 @dp.message(Command("banned"))
 @track_command
-async def cmd_banned(message: Message, command: CommandObject):
+async def cmd_banned(message: Message):
     lang = get_lang(message)
     ids = parse_ids((command.args or ""), 20)
     if not ids:
@@ -898,7 +903,7 @@ async def cmd_banned(message: Message, command: CommandObject):
 
 @dp.message(Command("accountage"))
 @track_command
-async def cmd_accountage(message: Message, command: CommandObject):
+async def cmd_accountage(message: Message):
     lang = get_lang(message)
     name = (command.args or "").strip()
     if not name:
@@ -932,7 +937,7 @@ async def cmd_accountage(message: Message, command: CommandObject):
 
 @dp.message(Command("lastonline"))
 @track_command
-async def cmd_lastonline(message: Message, command: CommandObject):
+async def cmd_lastonline(message: Message):
     lang = get_lang(message)
     name = (command.args or "").strip()
     if not name:
@@ -971,7 +976,7 @@ async def cmd_lastonline(message: Message, command: CommandObject):
 
 @dp.message(Command("avatar"))
 @track_command
-async def cmd_avatar(message: Message, command: CommandObject):
+async def cmd_avatar(message: Message):
     lang = get_lang(message)
     name = (command.args or "").strip()
     if not name:
@@ -999,7 +1004,7 @@ async def cmd_avatar(message: Message, command: CommandObject):
 
 @dp.message(Command("headshot"))
 @track_command
-async def cmd_headshot(message: Message, command: CommandObject):
+async def cmd_headshot(message: Message):
     lang = get_lang(message)
     name = (command.args or "").strip()
     if not name:
@@ -1027,7 +1032,7 @@ async def cmd_headshot(message: Message, command: CommandObject):
 
 @dp.message(Command("bust"))
 @track_command
-async def cmd_bust(message: Message, command: CommandObject):
+async def cmd_bust(message: Message):
     lang = get_lang(message)
     name = (command.args or "").strip()
     if not name:
@@ -1055,7 +1060,7 @@ async def cmd_bust(message: Message, command: CommandObject):
 
 @dp.message(Command("assetid"))
 @track_command
-async def cmd_assetid(message: Message, command: CommandObject):
+async def cmd_assetid(message: Message):
     lang = get_lang(message)
     raw = (command.args or "").strip()
     if not raw.isdigit():
@@ -1107,7 +1112,7 @@ async def cmd_assetid(message: Message, command: CommandObject):
 
 @dp.message(Command("asseticon"))
 @track_command
-async def cmd_asseticon(message: Message, command: CommandObject):
+async def cmd_asseticon(message: Message):
     lang = get_lang(message)
     raw = (command.args or "").strip()
     if not raw.isdigit():
@@ -1131,7 +1136,7 @@ async def cmd_asseticon(message: Message, command: CommandObject):
 
 @dp.message(Command("groupid"))
 @track_command
-async def cmd_groupid(message: Message, command: CommandObject):
+async def cmd_groupid(message: Message):
     lang = get_lang(message)
     raw = (command.args or "").strip()
     if not raw.isdigit():
@@ -1174,7 +1179,7 @@ async def cmd_groupid(message: Message, command: CommandObject):
 
 @dp.message(Command("group"))
 @track_command
-async def cmd_group(message: Message, command: CommandObject):
+async def cmd_group(message: Message):
     lang = get_lang(message)
     name = (command.args or "").strip()
     if not name:
@@ -1216,7 +1221,7 @@ async def cmd_group(message: Message, command: CommandObject):
 
 @dp.message(Command("groupicon"))
 @track_command
-async def cmd_groupicon(message: Message, command: CommandObject):
+async def cmd_groupicon(message: Message):
     lang = get_lang(message)
     raw = (command.args or "").strip()
     if not raw.isdigit():
@@ -1241,7 +1246,7 @@ async def cmd_groupicon(message: Message, command: CommandObject):
 
 @dp.message(Command("groups"))
 @track_command
-async def cmd_groups(message: Message, command: CommandObject):
+async def cmd_groups(message: Message):
     lang = get_lang(message)
     u = (command.args or "").strip()
     if not u:
@@ -1277,7 +1282,7 @@ async def cmd_groups(message: Message, command: CommandObject):
 
 @dp.message(Command("friends"))
 @track_command
-async def cmd_friends(message: Message, command: CommandObject):
+async def cmd_friends(message: Message):
     lang = get_lang(message)
     u = (command.args or "").strip()
     if not u:
@@ -1310,7 +1315,7 @@ async def cmd_friends(message: Message, command: CommandObject):
 
 @dp.message(Command("followers"))
 @track_command
-async def cmd_followers(message: Message, command: CommandObject):
+async def cmd_followers(message: Message):
     lang = get_lang(message)
     u = (command.args or "").strip()
     if not u:
@@ -1343,7 +1348,7 @@ async def cmd_followers(message: Message, command: CommandObject):
 
 @dp.message(Command("followings"))
 @track_command
-async def cmd_followings(message: Message, command: CommandObject):
+async def cmd_followings(message: Message):
     lang = get_lang(message)
     u = (command.args or "").strip()
     if not u:
@@ -1376,7 +1381,7 @@ async def cmd_followings(message: Message, command: CommandObject):
 
 @dp.message(Command("limiteds"))
 @track_command
-async def cmd_limiteds(message: Message, command: CommandObject):
+async def cmd_limiteds(message: Message):
     lang = get_lang(message)
     u = (command.args or "").strip()
     if not u:
@@ -1401,7 +1406,7 @@ async def cmd_limiteds(message: Message, command: CommandObject):
 
 @dp.message(Command("rolimons"))
 @track_command
-async def cmd_rolimons(message: Message, command: CommandObject):
+async def cmd_rolimons(message: Message):
     lang = get_lang(message)
     u = (command.args or "").strip()
     if not u:
@@ -1468,7 +1473,7 @@ async def cmd_rolimons(message: Message, command: CommandObject):
 
 @dp.message(Command("devex"))
 @track_command
-async def cmd_devex(message: Message, command: CommandObject):
+async def cmd_devex(message: Message):
     lang = get_lang(message)
     raw = (command.args or "").strip()
     if not raw.isdigit():
@@ -1492,7 +1497,7 @@ async def cmd_devex(message: Message, command: CommandObject):
 
 @dp.message(Command("devexcad"))
 @track_command
-async def cmd_devexcad(message: Message, command: CommandObject):
+async def cmd_devexcad(message: Message):
     lang = get_lang(message)
     raw = (command.args or "").strip()
     if not raw.isdigit():
@@ -1516,35 +1521,33 @@ async def cmd_devexcad(message: Message, command: CommandObject):
 
 @dp.message(Command("language"))
 @track_command
-async def cmd_language(message: Message, command: CommandObject):
-    uid = message.from_user.id if message.from_user else None
+async def cmd_language(message: Message):
+    uid = message.from_user.id
+
+    parts = message.text.split(maxsplit=1)
+    arg = parts[1].strip().lower() if len(parts) > 1 else ""
+
     lang_current = get_lang(message)
-    arg = (command.args or "").strip().lower()
-    if uid is None:
-        return
+
     if arg in ("en", "ru"):
         USER_LANG[uid] = arg
-        if arg == "ru":
-            await message.answer("Язык бота установлен на: 🇷🇺 Русский.")
-        else:
-            await message.answer("Bot language set to: 🇬🇧 English.")
+        await message.answer(
+            "Язык бота установлен на: 🇷🇺 Русский." if arg == "ru"
+            else "Bot language set to: 🇬🇧 English."
+        )
         return
-    if lang_current == "ru":
-        text = (
-            "🌐 <b>Смена языка</b>\n\n"
-            "Доступные языки:\n"
-            "• 🇬🇧 English — <code>/language en</code>\n"
-            "• 🇷🇺 Русский — <code>/language ru</code>\n\n"
-            "Или выберите кнопкой ниже."
-        )
-    else:
-        text = (
-            "🌐 <b>Language settings</b>\n\n"
-            "Available languages:\n"
-            "• 🇬🇧 English — <code>/language en</code>\n"
-            "• 🇷🇺 Russian — <code>/language ru</code>\n\n"
-            "Or use the buttons below."
-        )
+
+    text = (
+        "🌐 <b>Language settings</b>\n\n"
+        "• 🇬🇧 English — /language en\n"
+        "• 🇷🇺 Russian — /language ru"
+        if lang_current == "en"
+        else
+        "🌐 <b>Смена языка</b>\n\n"
+        "• 🇬🇧 English — /language en\n"
+        "• 🇷🇺 Русский — /language ru"
+    )
+
     kb = InlineKeyboardMarkup(
         inline_keyboard=[
             [
@@ -1553,11 +1556,12 @@ async def cmd_language(message: Message, command: CommandObject):
             ]
         ]
     )
+
     await message.answer(text, reply_markup=kb)
 
 @dp.message(Command("names"))
 @track_command
-async def cmd_names(message: Message, command: CommandObject):
+async def cmd_names(message: Message):
     lang = get_lang(message)
     name = (command.args or "").strip()
     if not name:
@@ -1600,7 +1604,7 @@ async def cmd_names(message: Message, command: CommandObject):
 
 @dp.message(Command("verified"))
 @track_command
-async def cmd_verified(message: Message, command: CommandObject):
+async def cmd_verified(message: Message):
     lang = get_lang(message)
     name = (command.args or "").strip()
     if not name:
@@ -1644,7 +1648,7 @@ async def cmd_verified(message: Message, command: CommandObject):
 
 @dp.message(Command("owned"))
 @track_command
-async def cmd_owned(message: Message, command: CommandObject):
+async def cmd_owned(message: Message):
     lang = get_lang(message)
     args = (command.args or "").split()
     if len(args) < 2 or not args[1].isdigit():
@@ -1703,7 +1707,7 @@ async def cmd_owned(message: Message, command: CommandObject):
 
 @dp.message(Command("obtained"))
 @track_command
-async def cmd_obtained(message: Message, command: CommandObject):
+async def cmd_obtained(message: Message):
     lang = get_lang(message)
     args = (command.args or "").split()
     if len(args) < 2 or not args[1].isdigit():
@@ -1755,7 +1759,7 @@ async def cmd_obtained(message: Message, command: CommandObject):
 
 @dp.message(Command("template"))
 @track_command
-async def cmd_template(message: Message, command: CommandObject):
+async def cmd_template(message: Message):
     lang = get_lang(message)
     raw = (command.args or "").strip()
     if not raw.isdigit():
@@ -1787,7 +1791,7 @@ async def cmd_template(message: Message, command: CommandObject):
 
 @dp.message(Command("offsales"))
 @track_command
-async def cmd_offsales(message: Message, command: CommandObject):
+async def cmd_offsales(message: Message):
     lang = get_lang(message)
     name = (command.args or "").strip()
     if not name:
