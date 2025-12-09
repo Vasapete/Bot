@@ -288,23 +288,31 @@ class RobloxAPI:
         )
         return data.get("data", []) if data else []
 
-    async def get_collectibles(self, uid: int):
-        from urllib.parse import urlencode
-        base = f"https://inventory.roblox.com/v1/users/{uid}/assets/collectibles"
-        items = []
-        cursor = None
-        while True:
-            params = {"limit": 100, "sortOrder": "Asc"}
-            if cursor:
-                params["cursor"] = cursor
+async def get_collectibles(self, uid: int):
+    from urllib.parse import urlencode
+    base = f"https://inventory.roblox.com/v1/users/{uid}/assets/collectibles"
+    items = []
+    cursor = None
+
+    while True:
+        params = {"limit": 100, "sortOrder": "Asc"}
+        if cursor:
+            params["cursor"] = cursor
+
+        try:
             data = await self.req("GET", base + "?" + urlencode(params))
-            if not data:
-                break
-            items.extend(data.get("data", []))
-            cursor = data.get("nextPageCursor")
-            if not cursor:
-                break
-        return items
+        except RuntimeError as e:
+            if "permissions" in str(e) or "403" in str(e):
+                return None
+            raise
+        if not data:
+            break
+
+        items.extend(data.get("data", []))
+        cursor = data.get("nextPageCursor")
+        if not cursor:
+            break
+    return items
 
     async def get_username_history(self, uid: int, limit: int = 50):
         from urllib.parse import urlencode
@@ -369,42 +377,55 @@ async def roli_get_items():
 async def compose_limiteds_text(uid: int, lang: str) -> str:
     user = await roblox.get_user_by_id(uid)
     if not user:
-        if lang == "ru":
-            return "Пользователь не найден."
-        return "User not found."
+        return "Пользователь не найден." if lang == "ru" else "User not found."
+
     name = user.get("name", str(uid))
+
     items = await roblox.get_collectibles(uid)
-    if not items:
+
+    if items is None:
         if lang == "ru":
-            return f"У {esc(name)} нет коллекционных предметов или инвентарь закрыт."
-        return f"{esc(name)} has no collectibles or inventory is private."
+            return f"🔒 Инвентарь игрока {esc(name)} закрыт. Нельзя просмотреть лимитки."
+        return f"🔒 {esc(name)} has a private inventory. Cannot view limiteds."
+
+    if len(items) == 0:
+        if lang == "ru":
+            return f"У {esc(name)} нет ограниченных предметов."
+        return f"{esc(name)} has no limiteds."
+
     roli_err = None
     roli_items = {}
+
     try:
         roli_items = await roli_get_items()
     except Exception as e:
         roli_err = str(e)
+
     total_rap = 0
     total_value = 0
     lines = []
+
     for it in items:
         aid = it.get("assetId")
         aname = esc(it.get("name", "Unknown"))
         rap = it.get("recentAveragePrice") or 0
         total_rap += rap
-        value = None
+
+        value = rap
         if roli_items:
             arr = roli_items.get(str(aid))
             if arr:
-                roli_val = arr[3]
-                if roli_val and roli_val > 0:
-                    value = roli_val
-        if value is None:
-            value = rap
+                rv = arr[3]
+                if rv and rv > 0:
+                    value = rv
+
         total_value += value
+
         lines.append(
-            f"• <a href=\"https://www.rolimons.com/item/{aid}\">{aname}</a> — RAP: <code>{rap:,}</code> | Value: <code>{value:,}</code>"
+            f"• <a href=\"https://www.rolimons.com/item/{aid}\">{aname}</a> — "
+            f"RAP: <code>{rap:,}</code> | Value: <code>{value:,}</code>"
         )
+
     if lang == "ru":
         header = (
             f"💼 <b>Лимитки игрока {esc(name)}</b>\n"
@@ -425,6 +446,7 @@ async def compose_limiteds_text(uid: int, lang: str) -> str:
         )
         if roli_err:
             header += f"\n⚠️ Rolimons issue: <code>{esc(roli_err)}</code>\n"
+
     return header + "\n" + "\n".join(lines)
 
 
@@ -1440,7 +1462,7 @@ async def cmd_limiteds(message, command: CommandObject):
         if lang == "ru":
             return await message.answer("Пользователь не найден.")
         return await message.answer("User not found.")
-    text = await compose_limiteds_text(base["id"], lang)
+    text = await compose_limiteds_text(uid, lang)
     await message.answer(text)
 
 
