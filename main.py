@@ -801,7 +801,7 @@ async def cmd_user(message, command: CommandObject):
             text += f"\n\n<b>📜 Description:</b>\n{desc}"
 
     kb = user_profile_keyboard(uid)
-    FALLBACK_IMG = ("https://media.discordapp.net/attachments/1339721639029637242/1448406486626599033/RS.png")
+    FALLBACK_IMG = ("https://media.discordapp.net/attachments/1340658780152533116/1448436167941947504/RS.png?ex=693b40cd&is=6939ef4d&hm=d6888d3758d4e3cea37877b8f818122f05f191c8d44107889bf4defc2dc7759d&")
     thumb = await roblox.get_user_thumbnail(uid, "bust")
     
     if (
@@ -871,7 +871,7 @@ async def cmd_id(message, command: CommandObject):
         if desc:
             txt += f"\n<b>📜 Description:</b>\n{desc}"
     kb = user_profile_keyboard(uid)
-    FALLBACK_IMG = ("https://media.discordapp.net/attachments/1339721639029637242/1448406486626599033/RS.png")
+    FALLBACK_IMG = ("https://media.discordapp.net/attachments/1340658780152533116/1448436167941947504/RS.png?ex=693b40cd&is=6939ef4d&hm=d6888d3758d4e3cea37877b8f818122f05f191c8d44107889bf4defc2dc7759d&")
     
     thumb = await roblox.get_user_thumbnail(uid, "bust")
     
