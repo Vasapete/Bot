@@ -178,17 +178,26 @@ class RobloxAPI:
         return self.session
 
     async def req(self, method: str, url: str, **kwargs):
-        s = await self.ensure()
-        async with s.request(method, url, **kwargs) as r:
-            try:
-                data = await r.json(content_type=None)
-            except Exception:
-                data = None
-            if r.status == 404:
-                return None
-            if r.status >= 400:
+        for attempt in range(3):
+            async with self.s.request(method, url, **kwargs) as r:
+                try:
+                    data = await r.json()
+                except Exception:
+                    data = await r.text()
+    
+                if 200 <= r.status < 300:
+                    return data
+    
+                if r.status == 429:
+                    await asyncio.sleep(0.8 + attempt * 0.5)
+                    continue
+    
+                if r.status == 403:
+                    return None
+    
                 raise RuntimeError(f"HTTP {r.status}: {data}")
-            return data
+        raise RuntimeError(f"HTTP 429 after retries: {url}")
+
 
     async def get_user_by_username(self, username: str):
         url = "https://users.roblox.com/v1/usernames/users"
