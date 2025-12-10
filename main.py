@@ -835,15 +835,22 @@ async def cmd_id(message, command: CommandObject):
         if desc:
             txt += f"\n<b>📜 Description:</b>\n{desc}"
     kb = user_profile_keyboard(uid)
-    thumb = await roblox.get_user_thumbnail(u["id"], "bust")
-    if not thumb or not thumb.startswith("https://"):
-        thumb = "https://tr.rbxcdn.com/4e6faf35cc06779c1c775cdbc55bb5f1/420/420/AvatarBust/Png"
-
+    FALLBACK_IMG = ("https://media.discordapp.net/attachments/1339721639029637242/1448406486626599033/RS.png")
+    
+    thumb = await roblox.get_user_thumbnail(uid, "bust")
+    
+    if (
+        not thumb
+        or not isinstance(thumb, str)
+        or not thumb.startswith("http")
+    ):
+        thumb = FALLBACK_IMG
+    
     try:
         await message.answer_photo(thumb, caption=text, reply_markup=kb)
-    except TelegramBadRequest:
-        fallback = "https://tr.rbxcdn.com/4e6faf35cc06779c1c775cdbc55bb5f1/420/420/AvatarBust/Png"
-        await message.answer_photo(fallback, caption=text, reply_markup=kb)
+    except Exception:
+        await message.answer_photo(FALLBACK_IMG, caption=text, reply_markup=kb)
+
 
 
 
