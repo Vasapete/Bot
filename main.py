@@ -311,31 +311,35 @@ class RobloxAPI:
         )
         return data.get("data", []) if data else []
 
-async def get_collectibles(self, uid: int):
-    from urllib.parse import urlencode
-    base = f"https://inventory.roblox.com/v1/users/{uid}/assets/collectibles"
-    items = []
-    cursor = None
+        async def get_collectibles(self, uid: int):
+        from urllib.parse import urlencode
 
-    while True:
-        params = {"limit": 100, "sortOrder": "Asc"}
-        if cursor:
-            params["cursor"] = cursor
+        base = f"https://inventory.roblox.com/v1/users/{uid}/assets/collectibles"
+        items = []
+        cursor = None
 
-        try:
-            data = await self.req("GET", base + "?" + urlencode(params))
-        except RuntimeError as e:
-            if "permissions" in str(e) or "403" in str(e):
-                return None
-            raise
-        if not data:
-            break
+        while True:
+            params = {"limit": 100, "sortOrder": "Asc"}
+            if cursor:
+                params["cursor"] = cursor
 
-        items.extend(data.get("data", []))
-        cursor = data.get("nextPageCursor")
-        if not cursor:
-            break
-    return items
+            try:
+                data = await self.req("GET", base + "?" + urlencode(params))
+            except RuntimeError as e:
+                if "permissions" in str(e) or "403" in str(e):
+                    return None
+                raise
+
+            if not data:
+                break
+
+            items.extend(data.get("data", []))
+            cursor = data.get("nextPageCursor")
+
+            if not cursor:
+                break
+
+        return items
 
     async def get_username_history(self, uid: int, limit: int = 50):
         from urllib.parse import urlencode
