@@ -69,7 +69,30 @@ def parse_ids(raw: str, max_count=20):
 
 
 def parse_iso8601(s: str) -> dt.datetime:
-    return dt.datetime.fromisoformat(s.replace("Z", "+00:00"))
+    s = s.replace("Z", "+00:00")
+
+    if "." in s:
+        before_tz, tz = (s.split("+", 1) + [""])[:2] if "+" in s else (s.split("-", 1) + [""])
+        if "+" in s:
+            sign = "+"
+        elif "-" in s[19:]:
+            sign = "-"
+        else:
+            sign = ""
+        if sign:
+            before_tz, tz = s.split(sign, 1)
+        else:
+            before_tz, tz = s, ""
+        if "." in before_tz:
+            left, frac = before_tz.split(".", 1)
+            if len(frac) == 1:
+                frac = frac + "00"
+            elif len(frac) == 2:
+                frac = frac + "0"
+            before_tz = f"{left}.{frac}"
+        s = before_tz + (sign + tz if sign else "")
+    return dt.datetime.fromisoformat(s)
+
 
 
 def detect_language(code: Optional[str]) -> str:
@@ -1462,7 +1485,7 @@ async def cmd_limiteds(message, command: CommandObject):
         if lang == "ru":
             return await message.answer("Пользователь не найден.")
         return await message.answer("User not found.")
-    text = await compose_limiteds_text(uid, lang)
+    text = await compose_limiteds_text(base["id"], lang)
     await message.answer(text)
 
 
