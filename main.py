@@ -40,6 +40,8 @@ USD_PER_ROBUX = 0.0038
 USD_TO_CAD = 1.35
 OWNER_ID = 1415037406
 DEFAULT_LANG = "en"
+REQUIRED_CHANNEL = "@yourchannelusername"
+
 
 bot = Bot(
     token=TELEGRAM_TOKEN,
@@ -49,6 +51,9 @@ dp = Dispatcher()
 
 START_TIME = dt.datetime.now(dt.timezone.utc)
 TOTAL_COMMANDS = 0
+USER_LAST_COMMAND: Dict[int, str] = {}
+USER_LAST_ARGS: Dict[int, str] = {}
+USER_COMMAND_COUNT: Dict[int, int] = {}
 CHAT_IDS: Set[int] = set()
 USER_IDS: Set[int] = set()
 USER_LANG: Dict[int, str] = {}
@@ -57,6 +62,12 @@ USER_LANG: Dict[int, str] = {}
 def esc(t: str) -> str:
     return t.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
 
+async def is_member(bot: Bot, user_id: int, channel: str) -> bool:
+    try:
+        member = await bot.get_chat_member(channel, user_id)
+        return member.status in ("member", "administrator", "creator")
+    except Exception:
+        return False
 
 def parse_ids(raw: str, max_count=20):
     ids: List[int] = []
@@ -153,15 +164,40 @@ def format_uptime(seconds: float) -> str:
 def track_command(func):
     async def wrapper(message: Message, command: CommandObject = None, *args, **kwargs):
         global TOTAL_COMMANDS
-        TOTAL_COMMANDS += 1
 
+        user = message.from_user
+        if not user:
+            return
+
+        user_id = user.id
+
+        is_in = await is_member(bot, user_id, REQUIRED_CHANNEL)
+
+        if not is_in:
+            channel_clean = REQUIRED_CHANNEL.replace("@", "")
+            join_link = f"https://t.me/{channel_clean}"
+
+            return await message.answer(
+                f"👋 <b>You must join our Telegram channel to use this bot.</b>\n\n"
+                f"🔗 Channel: {REQUIRED_CHANNEL}\n"
+                f"<a href=\"{join_link}\">👉 Join Channel</a>"
+            )
+
+        cmd_name = func.__name__
+        cmd_args = (command.args or "").strip() if command else ""
+
+        USER_LAST_COMMAND[user_id] = cmd_name
+        USER_LAST_ARGS[user_id] = cmd_args
+        USER_COMMAND_COUNT[user_id] = USER_COMMAND_COUNT.get(user_id, 0) + 1
+
+        TOTAL_COMMANDS += 1
         CHAT_IDS.add(message.chat.id)
-        if message.from_user:
-            USER_IDS.add(message.from_user.id)
+        USER_IDS.add(user_id)
 
         return await func(message, command)
 
     return wrapper
+
 
 
 class RobloxAPI:
@@ -1965,20 +2001,48 @@ async def cmd_links(message, command: CommandObject):
 @track_command
 async def cmd_botstats(message, command):
     lang = get_lang(message)
+
     if not message.from_user or message.from_user.id != OWNER_ID:
-        if lang == "ru":
-            return await message.answer("Эта команда доступна только владельцу бота.")
-        return await message.answer("This command is owner-only.")
+        return await message.answer(
+            "Эта команда доступна только владельцу бота." if lang == "ru"
+            else "This command is owner-only."
+        )
+
     now = dt.datetime.now(dt.timezone.utc)
     uptime_sec = (now - START_TIME).total_seconds()
     uptime_str = format_uptime(uptime_sec)
+
     total_chats = len(CHAT_IDS)
     total_users = len(USER_IDS)
     cmds = TOTAL_COMMANDS
-    per_hour = cmds / (uptime_sec / 3600) if uptime_sec > 0 else float(cmds)
+    per_hour = cmds / (uptime_sec / 3600) if uptime_sec > 0 else cmds
+
     process = psutil.Process(os.getpid())
     mem_mb = process.memory_info().rss / (1024 * 1024)
+
     restart_str = START_TIME.strftime("%Y-%m-%d %H:%M:%S UTC")
+
+    last_cmd_text = ""
+    if USER_LAST_COMMAND:
+        last_uid = list(USER_LAST_COMMAND.keys())[-1]
+        last_cmd = USER_LAST_COMMAND[last_uid]
+        last_args = USER_LAST_ARGS.get(last_uid, "")
+        last_cmd_text = f"{last_cmd} {last_args}".strip()
+    else:
+        last_cmd_text = "None"
+    if USER_COMMAND_COUNT:
+        sorted_top = sorted(
+            USER_COMMAND_COUNT.items(),
+            key=lambda x: x[1],
+            reverse=True
+        )[:5]
+
+        top_users_text = "\n".join(
+            [f"• <code>{uid}</code>: {count} commands" for uid, count in sorted_top]
+        )
+    else:
+        top_users_text = "None"
+
     if lang == "ru":
         text = (
             "📈 <b>Статистика бота</b>\n\n"
@@ -1988,21 +2052,25 @@ async def cmd_botstats(message, command):
             f"• Команд в час: <code>{per_hour:.2f}</code>\n"
             f"• Аптайм: <code>{uptime_str}</code>\n"
             f"• Память: <code>{mem_mb:.2f} MB</code>\n"
-            f"• Последний рестарт: <code>{restart_str}</code>"
+            f"• Последний рестарт: <code>{restart_str}</code>\n\n"
+            f"🕹️ <b>Последняя команда:</b> <code>{last_cmd_text}</code>\n\n"
+            f"🏆 <b>Топ пользователей:</b>\n{top_users_text}"
         )
     else:
         text = (
-            "📈 <b>Bot stats</b>\n\n"
-            f"• Total unique chats: <code>{total_chats}</code>\n"
-            f"• Total unique users: <code>{total_users}</code>\n"
+            "📈 <b>Bot statistics</b>\n\n"
+            f"• Total chats: <code>{total_chats}</code>\n"
+            f"• Total users: <code>{total_users}</code>\n"
             f"• Total commands: <code>{cmds}</code>\n"
-            f"• Commands per hour: <code>{per_hour:.2f}</code>\n"
+            f"• Commands/hour: <code>{per_hour:.2f}</code>\n"
             f"• Uptime: <code>{uptime_str}</code>\n"
             f"• Memory usage: <code>{mem_mb:.2f} MB</code>\n"
-            f"• Last restart: <code>{restart_str}</code>"
+            f"• Last restart: <code>{restart_str}</code>\n\n"
+            f"🕹️ <b>Last command:</b> <code>{last_cmd_text}</code>\n\n"
+            f"🏆 <b>Top users:</b>\n{top_users_text}"
         )
-    await message.answer(text)
 
+    await message.answer(text)
 
 @dp.callback_query(F.data == "help_open")
 async def cb_help_open(cb: CallbackQuery):
