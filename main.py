@@ -176,30 +176,30 @@ class RobloxAPI:
                 headers={"User-Agent": "Mozilla/5.0 (RBLXScanBot/1.0)"}
             )
         return self.session
-
+        
     async def req(self, method: str, url: str, **kwargs):
-    session = await self.ensure()
+        session = await self.ensure()
 
-    for attempt in range(3):
-        async with session.request(method, url, **kwargs) as r:
-            try:
-                data = await r.json()
-            except Exception:
-                data = await r.text()
+        for attempt in range(3):
+            async with session.request(method, url, **kwargs) as r:
+                try:
+                    data = await r.json()
+                except Exception:
+                    data = await r.text()
 
-            if 200 <= r.status < 300:
-                return data
+                if 200 <= r.status < 300:
+                    return data
 
-            if r.status == 429:
-                await asyncio.sleep(0.8 + attempt * 0.5)
-                continue
+                if r.status == 429:
+                    await asyncio.sleep(0.8 + attempt * 0.5)
+                    continue
+                    
+                if r.status == 403:
+                    return None
 
-            if r.status == 403:
-                return None
+                raise RuntimeError(f"HTTP {r.status}: {data}")
 
-            raise RuntimeError(f"HTTP {r.status}: {data}")
-
-    raise RuntimeError(f"HTTP 429 after retries: {url}")
+        raise RuntimeError(f"HTTP 429 after retries: {url}")
 
 
     async def get_user_by_username(self, username: str):
