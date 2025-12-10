@@ -751,11 +751,25 @@ async def cmd_user(message, command: CommandObject):
             text += f"\n<b>🏅 Rolimons badges:</b> {esc(roli_badges_text)}"
         if desc:
             text += f"\n\n<b>📜 Description:</b>\n{desc}"
-    thumb = await roblox.get_user_thumbnail(uid, "headshot")
+
     kb = user_profile_keyboard(uid)
-    if thumb:
-        return await message.answer_photo(thumb, caption=text, reply_markup=kb)
-    return await message.answer(text, reply_markup=kb)
+    FALLBACK_IMG = ("https://media.discordapp.net/attachments/1339721639029637242/1448406486626599033/RS.png?ex=693b2528&is=6939d3a8&hm=1b302e1f509be1237db461075c211badae09e253fc21ca5d0506a98c105ba66f&=&format=webp&quality=lossless&width=800&height=800")
+    
+    thumb = await roblox.get_user_thumbnail(u["id"], "bust")
+    
+    if (
+        not thumb
+        or not isinstance(thumb, str)
+        or not thumb.startswith("http")
+        or "errors" in thumb
+    ):
+        thumb = FALLBACK_IMG
+
+    try:
+        await message.answer_photo(thumb, caption=text, reply_markup=kb)
+    except Exception:
+        await message.answer_photo(FALLBACK_IMG, caption=text, reply_markup=kb)
+
 
 
 @dp.message(Command("id"))
