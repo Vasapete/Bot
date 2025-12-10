@@ -311,7 +311,7 @@ class RobloxAPI:
         )
         return data.get("data", []) if data else []
 
-        async def get_collectibles(self, uid: int):
+    async def get_collectibles(self, uid: int):
         from urllib.parse import urlencode
 
         base = f"https://inventory.roblox.com/v1/users/{uid}/assets/collectibles"
@@ -326,6 +326,7 @@ class RobloxAPI:
             try:
                 data = await self.req("GET", base + "?" + urlencode(params))
             except RuntimeError as e:
+                # Inventory private → do not crash
                 if "permissions" in str(e) or "403" in str(e):
                     return None
                 raise
@@ -340,6 +341,7 @@ class RobloxAPI:
                 break
 
         return items
+
 
     async def get_username_history(self, uid: int, limit: int = 50):
         from urllib.parse import urlencode
