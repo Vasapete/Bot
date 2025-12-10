@@ -40,7 +40,7 @@ USD_PER_ROBUX = 0.0038
 USD_TO_CAD = 1.35
 OWNER_ID = 1415037406
 DEFAULT_LANG = "en"
-REQUIRED_CHANNEL = "@yourchannelusername"
+REQUIRED_CHANNEL = "@RBLXSnews"
 
 
 bot = Bot(
