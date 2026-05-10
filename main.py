@@ -204,12 +204,18 @@ class RobloxAPI:
     def __init__(self):
         self.session: Optional[aiohttp.ClientSession] = None
         self.timeout = ClientTimeout(total=15)
+        self.cookie = os.getenv("ROBLOX_COOKIE", "")
 
     async def ensure(self):
         if self.session is None or self.session.closed:
+            headers = {"User-Agent": "Mozilla/5.0 (RBLXScanBot/1.0)"}
+            if self.cookie:                                         
+                headers["Cookie"] = f".ROBLOSECURITY={self.cookie}" 
+            else:                                                   
+                print("⚠️ WARNING: ROBLOX_COOKIE is not set!")     
             self.session = aiohttp.ClientSession(
                 timeout=self.timeout,
-                headers={"User-Agent": "Mozilla/5.0 (RBLXScanBot/1.0)"}
+                headers=headers
             )
         return self.session
         
