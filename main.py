@@ -32,6 +32,11 @@ from aiogram.types import (
 from aiogram.client.default import DefaultBotProperties
 from aiogram.exceptions import TelegramNetworkError
 from aiohttp import ClientTimeout
+from aiogram.fsm.context import FSMContext
+from aiogram.fsm.state import State, StatesGroup
+from aiogram.exceptions import TelegramForbiddenError, TelegramRetryAfter
+import logging
+logging.basicConfig(level=logging.INFO)
 
 load_dotenv()
 TELEGRAM_TOKEN = os.getenv("TELEGRAM_TOKEN")
@@ -43,7 +48,7 @@ USD_TO_CAD = 1.35
 OWNER_ID = 1415037406
 DEFAULT_LANG = "en"
 REQUIRED_CHANNEL = "@RBLXSnews"
-
+BROADCAST_HISTORY = []
 
 bot = Bot(
     token=TELEGRAM_TOKEN,
@@ -164,7 +169,9 @@ def format_uptime(seconds: float) -> str:
 
 
 def track_command(func):
-    async def wrapper(message: Message, command: CommandObject = None, *args, **kwargs):
+    import functools
+    @functools.wraps(func)  # ← preserves function signature for aiogram
+    async def wrapper(message: Message, command: CommandObject = None, **kwargs):
         global TOTAL_COMMANDS
 
         user = message.from_user
@@ -178,7 +185,6 @@ def track_command(func):
         if not is_in:
             channel_clean = REQUIRED_CHANNEL.replace("@", "")
             join_link = f"https://t.me/{channel_clean}"
-
             return await message.answer(
                 f"👋 <b>You must join our Telegram channel to use this bot.</b>\n\n"
                 f"🔗 Channel: {REQUIRED_CHANNEL}\n"
@@ -196,7 +202,7 @@ def track_command(func):
         CHAT_IDS.add(message.chat.id)
         USER_IDS.add(user_id)
 
-        return await func(message, command)
+        return await func(message, command, **kwargs)  # ← pass kwargs (includes state)
 
     return wrapper
 
@@ -223,26 +229,45 @@ class RobloxAPI:
         
     async def req(self, method: str, url: str, **kwargs):
         session = await self.ensure()
-
+    
         for attempt in range(3):
-            async with session.request(method, url, **kwargs) as r:
-                try:
-                    data = await r.json()
-                except Exception:
-                    data = await r.text()
-
-                if 200 <= r.status < 300:
-                    return data
-
-                if r.status == 429:
-                    await asyncio.sleep(0.8 + attempt * 0.5)
-                    continue
-                    
-                if r.status == 403:
-                    return None
-
-                raise RuntimeError(f"HTTP {r.status}: {data}")
-
+            try:
+                async with session.request(method, url, **kwargs) as r:
+                    try:
+                        data = await r.json()
+                    except Exception:
+                        data = await r.text()
+    
+                    if 200 <= r.status < 300:
+                        return data
+    
+                    if r.status == 429:
+                        await asyncio.sleep(0.8 + attempt * 0.5)
+                        continue
+    
+                    if r.status == 403:
+                        return None
+    
+                    raise RuntimeError(f"HTTP {r.status}: {data}")
+    
+            except aiohttp.ClientConnectorDNSError as e:
+                logging.warning(f"DNS error on attempt {attempt + 1} for {url}: {e}")
+                if attempt == 2:
+                    raise RuntimeError(f"DNS resolution failed after 3 attempts: {url}") from e
+                await asyncio.sleep(2 ** attempt)  # 1s, 2s, 4s
+                # Force recreate session on DNS error
+                if self.session and not self.session.closed:
+                    await self.session.close()
+                self.session = None
+                session = await self.ensure()
+                continue
+    
+            except aiohttp.ClientError as e:
+                if attempt == 2:
+                    raise RuntimeError(f"Connection error: {e}") from e
+                await asyncio.sleep(1)
+                continue
+    
         raise RuntimeError(f"HTTP 429 after retries: {url}")
 
 
@@ -879,23 +904,18 @@ async def cmd_id(message, command: CommandObject):
         if desc:
             txt += f"\n<b>📜 Description:</b>\n{desc}"
     kb = user_profile_keyboard(uid)
-    FALLBACK_IMG = ("https://media.discordapp.net/attachments/1340658780152533116/1448436167941947504/RS.png?ex=693b40cd&is=6939ef4d&hm=d6888d3758d4e3cea37877b8f818122f05f191c8d44107889bf4defc2dc7759d&")
-    
+    FALLBACK_IMG = "https://media.discordapp.net/attachments/1340658780152533116/1448436167941947504/RS.png?ex=693b40cd&is=6939ef4d&hm=d6888d3758d4e3cea37877b8f818122f05f191c8d44107889bf4defc2dc7759d&"
     thumb = await roblox.get_user_thumbnail(uid, "bust")
-    
     if (
         not thumb
         or not isinstance(thumb, str)
         or not thumb.startswith("http")
     ):
         thumb = FALLBACK_IMG
-    
     try:
-        await message.answer_photo(thumb, caption=text, reply_markup=kb)
+        await message.answer_photo(thumb, caption=txt, reply_markup=kb)  # ← was `text`, now `txt`
     except Exception:
-        await message.answer_photo(FALLBACK_IMG, caption=text, reply_markup=kb)
-
-
+        await message.answer_photo(FALLBACK_IMG, caption=txt, reply_markup=kb)
 
 
 @dp.message(Command("username"))
@@ -996,6 +1016,315 @@ async def cmd_copyid(message, command: CommandObject):
         f"🆔 ID of <code>{esc(u['name'])}</code> = <code>{u['id']}</code>"
     )
 
+class BroadcastStates(StatesGroup):
+    waiting_for_message = State()
+    confirming = State()
+
+
+@dp.message(Command("broadcast"))
+@track_command
+async def cmd_broadcast(message: Message, command: CommandObject = None, state: FSMContext = None):
+    lang = get_lang(message)
+
+    if not message.from_user or message.from_user.id != OWNER_ID:
+        return await message.answer(
+            "Эта команда доступна только владельцу бота." if lang == "ru"
+            else "This command is owner-only."
+        )
+
+    if state is None:
+        return await message.answer("State error. Please try again.")
+
+    await message.answer(
+        "📢 <b>Рассылка</b>\n\n"
+        "Отправь сообщение которое хочешь разослать.\n"
+        "Можно отправить: текст, фото, видео, стикер.\n\n"
+        "Отправь /cancel для отмены."
+        if lang == "ru" else
+        "📢 <b>Broadcast</b>\n\n"
+        "Send the message you want to broadcast.\n"
+        "You can send: text, photo, video, sticker.\n\n"
+        "Send /cancel to cancel.",
+        parse_mode="HTML"
+    )
+    await state.set_state(BroadcastStates.waiting_for_message)
+
+@dp.message(BroadcastStates.waiting_for_message)
+async def broadcast_get_message(message: Message, state: FSMContext):
+    lang = get_lang(message)
+
+    if message.text and message.text == "/cancel":
+        await state.clear()
+        return await message.answer(
+            "❌ Рассылка отменена." if lang == "ru" else "❌ Broadcast cancelled."
+        )
+
+    await state.update_data(
+        message_id=message.message_id,
+        from_chat_id=message.chat.id
+    )
+
+    total = len(USER_IDS)
+
+    kb = InlineKeyboardMarkup(inline_keyboard=[
+        [
+            InlineKeyboardButton(
+                text="✅ Отправить" if lang == "ru" else "✅ Send",
+                callback_data="broadcast_confirm"
+            ),
+            InlineKeyboardButton(
+                text="❌ Отмена" if lang == "ru" else "❌ Cancel",
+                callback_data="broadcast_cancel"
+            )
+        ]
+    ])
+
+    await message.answer(
+        f"📢 <b>{'Подтверждение' if lang == 'ru' else 'Confirm Broadcast'}</b>\n\n"
+        f"{'Получателей' if lang == 'ru' else 'Recipients'}: <b>{total}</b>\n\n"
+        f"{'Отправить это сообщение всем?' if lang == 'ru' else 'Send this message to everyone?'}",
+        parse_mode="HTML",
+        reply_markup=kb
+    )
+    await state.set_state(BroadcastStates.confirming)
+
+
+@dp.callback_query(F.data == "broadcast_cancel")
+async def broadcast_cancel_cb(callback: CallbackQuery, state: FSMContext):
+    if callback.from_user.id != OWNER_ID:
+        return
+    await state.clear()
+    await callback.message.edit_text("❌ Broadcast cancelled.")
+
+
+@dp.callback_query(F.data == "broadcast_confirm")
+async def broadcast_confirm_cb(callback: CallbackQuery, state: FSMContext, bot: Bot):
+    if callback.from_user.id != OWNER_ID:
+        return
+
+    data = await state.get_data()
+    message_id = data.get("message_id")
+    from_chat_id = data.get("from_chat_id")
+    await state.clear()
+
+    await callback.message.edit_text("📤 Broadcasting... Please wait.")
+
+    success = 0
+    failed = 0
+    blocked = 0
+
+    # Send only to private chats (positive IDs = users)
+    user_list = [uid for uid in USER_IDS if uid > 0]
+
+    for user_id in user_list:
+        try:
+            await bot.copy_message(
+                chat_id=user_id,
+                from_chat_id=from_chat_id,
+                message_id=message_id
+            )
+            success += 1
+            await asyncio.sleep(0.05)
+
+        except TelegramForbiddenError:
+            blocked += 1
+            USER_IDS.discard(user_id)  # Remove blocked users
+
+        except TelegramRetryAfter as e:
+            await asyncio.sleep(e.retry_after)
+            try:
+                await bot.copy_message(
+                    chat_id=user_id,
+                    from_chat_id=from_chat_id,
+                    message_id=message_id
+                )
+                success += 1
+            except Exception:
+                failed += 1
+
+        except Exception as e:
+            failed += 1
+            logging.error(f"Broadcast failed for {user_id}: {e}")
+
+    # Save to broadcast history
+    BROADCAST_HISTORY.append({
+        "date": dt.datetime.now(dt.timezone.utc).strftime("%Y-%m-%d %H:%M UTC"),
+        "success": success,
+        "failed": failed + blocked
+    })
+
+    # Keep only last 10 broadcasts in memory
+    if len(BROADCAST_HISTORY) > 10:
+        BROADCAST_HISTORY.pop(0)
+
+    await callback.message.edit_text(
+        f"📢 <b>Broadcast Complete!</b>\n\n"
+        f"✅ Sent: <b>{success}</b>\n"
+        f"🚫 Blocked: <b>{blocked}</b>\n"
+        f"❌ Failed: <b>{failed}</b>\n"
+        f"👥 Total attempted: <b>{len(user_list)}</b>",
+        parse_mode="HTML"
+    )
+
+class AnnounceStates(StatesGroup):
+    waiting_for_message = State()
+    confirming = State()
+
+
+@dp.message(Command("announce"))
+@track_command
+async def cmd_announce(message: Message, command: CommandObject = None, state: FSMContext = None):
+    lang = get_lang(message)
+
+    if not message.from_user or message.from_user.id != OWNER_ID:
+        return await message.answer(
+            "Эта команда доступна только владельцу бота." if lang == "ru"
+            else "This command is owner-only."
+        )
+
+    if state is None:
+        return await message.answer("State error.")
+
+    await message.answer(
+        "📰 <b>Объявление / Новость</b>\n\n"
+        "Отправь сообщение которое хочешь опубликовать как новость.\n"
+        "Оно будет отправлено всем пользователям с префиксом 📰 <b>Новость</b>.\n\n"
+        "/cancel — отмена"
+        if lang == "ru" else
+        "📰 <b>Announcement / News</b>\n\n"
+        "Send the message to publish as a news announcement.\n"
+        "It will be sent to all users with a 📰 <b>News</b> prefix.\n\n"
+        "/cancel — cancel",
+        parse_mode="HTML"
+    )
+    await state.set_state(AnnounceStates.waiting_for_message)
+
+
+@dp.message(AnnounceStates.waiting_for_message)
+async def announce_get_message(message: Message, state: FSMContext):
+    lang = get_lang(message)
+
+    if message.text and message.text.strip() == "/cancel":
+        await state.clear()
+        return await message.answer(
+            "❌ Объявление отменено." if lang == "ru" else "❌ Announcement cancelled."
+        )
+
+    await state.update_data(
+        message_id=message.message_id,
+        from_chat_id=message.chat.id
+    )
+
+    total = len([uid for uid in USER_IDS if uid > 0])
+
+    kb = InlineKeyboardMarkup(inline_keyboard=[
+        [
+            InlineKeyboardButton(
+                text="✅ Опубликовать" if lang == "ru" else "✅ Publish",
+                callback_data="announce_confirm"
+            ),
+            InlineKeyboardButton(
+                text="❌ Отмена" if lang == "ru" else "❌ Cancel",
+                callback_data="announce_cancel"
+            )
+        ]
+    ])
+
+    await message.answer(
+        f"📰 <b>{'Подтверждение' if lang == 'ru' else 'Confirm Announcement'}</b>\n\n"
+        f"{'Получателей' if lang == 'ru' else 'Recipients'}: <b>{total}</b>\n\n"
+        f"{'Опубликовать это объявление?' if lang == 'ru' else 'Publish this announcement to everyone?'}",
+        parse_mode="HTML",
+        reply_markup=kb
+    )
+    await state.set_state(AnnounceStates.confirming)
+
+
+@dp.callback_query(F.data == "announce_cancel")
+async def announce_cancel_cb(callback: CallbackQuery, state: FSMContext):
+    if callback.from_user.id != OWNER_ID:
+        return
+    await state.clear()
+    await callback.message.edit_text("❌ Announcement cancelled.")
+
+
+@dp.callback_query(F.data == "announce_confirm")
+async def announce_confirm_cb(callback: CallbackQuery, state: FSMContext, bot: Bot):
+    if callback.from_user.id != OWNER_ID:
+        return
+
+    data = await state.get_data()
+    message_id = data.get("message_id")
+    from_chat_id = data.get("from_chat_id")
+    await state.clear()
+
+    await callback.message.edit_text("📤 Sending announcement... Please wait.")
+
+    user_list = [uid for uid in USER_IDS if uid > 0]
+    success = 0
+    failed = 0
+    blocked = 0
+
+    # Send header + original message
+    for user_id in user_list:
+        try:
+            # Send news header first
+            await bot.send_message(
+                chat_id=user_id,
+                text="📰 <b>RBLXScan News</b>",
+                parse_mode="HTML"
+            )
+            # Then copy the actual message
+            await bot.copy_message(
+                chat_id=user_id,
+                from_chat_id=from_chat_id,
+                message_id=message_id
+            )
+            success += 1
+            await asyncio.sleep(0.07)  # ~14 messages/second, safe for Telegram
+
+        except TelegramForbiddenError:
+            blocked += 1
+            USER_IDS.discard(user_id)
+
+        except TelegramRetryAfter as e:
+            await asyncio.sleep(e.retry_after)
+            try:
+                await bot.send_message(
+                    chat_id=user_id,
+                    text="📰 <b>RBLXScan News</b>",
+                    parse_mode="HTML"
+                )
+                await bot.copy_message(
+                    chat_id=user_id,
+                    from_chat_id=from_chat_id,
+                    message_id=message_id
+                )
+                success += 1
+            except Exception:
+                failed += 1
+
+        except Exception as e:
+            failed += 1
+            logging.error(f"Announce failed for {user_id}: {e}")
+
+    BROADCAST_HISTORY.append({
+        "date": dt.datetime.now(dt.timezone.utc).strftime("%Y-%m-%d %H:%M UTC"),
+        "type": "announcement",
+        "success": success,
+        "failed": failed + blocked
+    })
+    if len(BROADCAST_HISTORY) > 10:
+        BROADCAST_HISTORY.pop(0)
+
+    await callback.message.edit_text(
+        f"📰 <b>Announcement Sent!</b>\n\n"
+        f"✅ Delivered: <b>{success}</b>\n"
+        f"🚫 Blocked: <b>{blocked}</b>\n"
+        f"❌ Failed: <b>{failed}</b>\n"
+        f"👥 Total: <b>{len(user_list)}</b>",
+        parse_mode="HTML"
+    )
 
 @dp.message(Command("idtousername"))
 @track_command
@@ -2078,47 +2407,71 @@ async def cmd_botstats(message, command):
         last_cmd_text = f"{last_cmd} {last_args}".strip()
     else:
         last_cmd_text = "None"
+
     if USER_COMMAND_COUNT:
         sorted_top = sorted(
             USER_COMMAND_COUNT.items(),
             key=lambda x: x[1],
             reverse=True
         )[:5]
-
         top_users_text = "\n".join(
             [f"• <code>{uid}</code>: {count} commands" for uid, count in sorted_top]
         )
     else:
         top_users_text = "None"
 
+    # Group chats count
+    active_groups = len([c for c in CHAT_IDS if c < 0])  # negative IDs = groups
+    private_chats = len([c for c in CHAT_IDS if c > 0])  # positive IDs = private
+
+    # Last broadcast info
+    if BROADCAST_HISTORY:
+        last_bc = BROADCAST_HISTORY[-1]
+        bc_type = last_bc.get("type", "broadcast")
+        bc_icon = "📰" if bc_type == "announcement" else "📢"
+        broadcast_text = (
+            f"{bc_icon} {last_bc['date']}\n"
+            f"   ✅ {last_bc['success']} | ❌ {last_bc['failed']}"
+        )
+    else:
+        broadcast_text = "Never" if lang != "ru" else "Никогда"
+
     if lang == "ru":
         text = (
             "📈 <b>Статистика бота</b>\n\n"
-            f"• Уникальных чатов: <code>{total_chats}</code>\n"
-            f"• Уникальных пользователей: <code>{total_users}</code>\n"
-            f"• Всего команд: <code>{cmds}</code>\n"
-            f"• Команд в час: <code>{per_hour:.2f}</code>\n"
-            f"• Аптайм: <code>{uptime_str}</code>\n"
-            f"• Память: <code>{mem_mb:.2f} MB</code>\n"
-            f"• Последний рестарт: <code>{restart_str}</code>\n\n"
+            "👥 <b>Пользователи</b>\n"
+            f"├ Всего пользователей: <code>{total_users}</code>\n"
+            f"├ Личных чатов: <code>{private_chats}</code>\n"
+            f"└ Групповых чатов: <code>{active_groups}</code>\n\n"
+            "⚙️ <b>Активность</b>\n"
+            f"├ Всего команд: <code>{cmds}</code>\n"
+            f"├ Команд в час: <code>{per_hour:.2f}</code>\n"
+            f"├ Аптайм: <code>{uptime_str}</code>\n"
+            f"├ Память: <code>{mem_mb:.2f} MB</code>\n"
+            f"└ Последний рестарт: <code>{restart_str}</code>\n\n"
             f"🕹️ <b>Последняя команда:</b> <code>{last_cmd_text}</code>\n\n"
+            f"📢 <b>Последняя рассылка:</b>\n└ {broadcast_text}\n\n"
             f"🏆 <b>Топ пользователей:</b>\n{top_users_text}"
         )
     else:
         text = (
-            "📈 <b>Bot statistics</b>\n\n"
-            f"• Total chats: <code>{total_chats}</code>\n"
-            f"• Total users: <code>{total_users}</code>\n"
-            f"• Total commands: <code>{cmds}</code>\n"
-            f"• Commands/hour: <code>{per_hour:.2f}</code>\n"
-            f"• Uptime: <code>{uptime_str}</code>\n"
-            f"• Memory usage: <code>{mem_mb:.2f} MB</code>\n"
-            f"• Last restart: <code>{restart_str}</code>\n\n"
+            "📈 <b>Bot Statistics</b>\n\n"
+            "👥 <b>Users</b>\n"
+            f"├ Total users: <code>{total_users}</code>\n"
+            f"├ Private chats: <code>{private_chats}</code>\n"
+            f"└ Group chats: <code>{active_groups}</code>\n\n"
+            "⚙️ <b>Activity</b>\n"
+            f"├ Total commands: <code>{cmds}</code>\n"
+            f"├ Commands/hour: <code>{per_hour:.2f}</code>\n"
+            f"├ Uptime: <code>{uptime_str}</code>\n"
+            f"├ Memory: <code>{mem_mb:.2f} MB</code>\n"
+            f"└ Last restart: <code>{restart_str}</code>\n\n"
             f"🕹️ <b>Last command:</b> <code>{last_cmd_text}</code>\n\n"
+            f"📢 <b>Last broadcast:</b>\n└ {broadcast_text}\n\n"
             f"🏆 <b>Top users:</b>\n{top_users_text}"
         )
 
-    await message.answer(text)
+    await message.answer(text, parse_mode="HTML")
 
 @dp.callback_query(F.data == "help_open")
 async def cb_help_open(cb: CallbackQuery):
@@ -2170,6 +2523,29 @@ async def cb_set_lang(cb: CallbackQuery):
         await cb.message.answer("Bot language set to: 🇬🇧 English.")
     await cb.answer()
 
+# Track when bot is added to or removed from groups
+@dp.my_chat_member()
+async def on_bot_chat_member_update(event):
+    try:
+        # Bot added to group
+        if (
+            event.new_chat_member.user.id == bot.id
+            and event.new_chat_member.status in ("member", "administrator")
+            and event.old_chat_member.status in ("left", "kicked", "restricted")
+        ):
+            CHAT_IDS.add(event.chat.id)
+            logging.info(f"Bot added to group: {event.chat.id} ({event.chat.title})")
+
+        # Bot removed from group
+        elif (
+            event.new_chat_member.user.id == bot.id
+            and event.new_chat_member.status in ("left", "kicked")
+        ):
+            CHAT_IDS.discard(event.chat.id)
+            logging.info(f"Bot removed from group: {event.chat.id}")
+
+    except Exception as e:
+        logging.error(f"Error in chat member update: {e}")
 
 async def main():
     await bot.set_my_commands(
