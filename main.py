@@ -346,12 +346,31 @@ class RobloxAPI:
         if not data or not data.get("data"):
             return None
         return data["data"][0]["imageUrl"]
-
+    
     async def get_asset_info(self, aid: int):
-        return await self.req(
-            "GET",
-            f"https://api.roblox.com/marketplace/productinfo?assetId={aid}",
-        )
+        try:
+            data = await self.req(
+                "GET",
+                f"https://economy.roblox.com/v2/assets/{aid}/details",
+            )
+            if data:
+                return data
+        except RuntimeError:
+            pass
+    
+        try:
+            data = await self.req(
+                "GET",
+                f"https://catalog.roblox.com/v1/catalog/items/details",
+                json={"items": [{"itemType": "Asset", "id": aid}]},
+                method="POST"
+            )
+            if data and data.get("data"):
+                return data["data"][0]
+        except RuntimeError:
+            pass
+    
+        return None
 
     async def get_group_by_id(self, gid: int):
         return await self.req("GET", f"https://groups.roblox.com/v1/groups/{gid}")
@@ -834,7 +853,7 @@ async def cmd_user(message, command: CommandObject):
             text += f"\n\n<b>📜 Description:</b>\n{desc}"
 
     kb = user_profile_keyboard(uid)
-    FALLBACK_IMG = ("https://media.discordapp.net/attachments/1340658780152533116/1448436167941947504/RS.png?ex=693b40cd&is=6939ef4d&hm=d6888d3758d4e3cea37877b8f818122f05f191c8d44107889bf4defc2dc7759d&")
+    FALLBACK_IMG = ("https://media.discordapp.net/attachments/1278854601382039686/1503843004232896622/RS.png?ex=6a04d270&is=6a0380f0&hm=7cf1a833960ce626c8e09d6b0c69798de9c7f14f64e5ad4abda534e2df429681&=&format=webp&quality=lossless")
     thumb = await roblox.get_user_thumbnail(uid, "bust")
     
     if (
@@ -904,7 +923,7 @@ async def cmd_id(message, command: CommandObject):
         if desc:
             txt += f"\n<b>📜 Description:</b>\n{desc}"
     kb = user_profile_keyboard(uid)
-    FALLBACK_IMG = "https://media.discordapp.net/attachments/1340658780152533116/1448436167941947504/RS.png?ex=693b40cd&is=6939ef4d&hm=d6888d3758d4e3cea37877b8f818122f05f191c8d44107889bf4defc2dc7759d&"
+    FALLBACK_IMG = "https://media.discordapp.net/attachments/1278854601382039686/1503843004232896622/RS.png?ex=6a04d270&is=6a0380f0&hm=7cf1a833960ce626c8e09d6b0c69798de9c7f14f64e5ad4abda534e2df429681&=&format=webp&quality=lossless"
     thumb = await roblox.get_user_thumbnail(uid, "bust")
     if (
         not thumb
@@ -1603,44 +1622,64 @@ async def cmd_assetid(message, command: CommandObject):
             "/assetid &lt;AssetID&gt;\n→ Show item info\nExample: <code>/assetid 1029025</code>"
         )
     aid = int(raw)
-    info = await roblox.get_asset_info(aid)
+
+    try:
+        info = await roblox.get_asset_info(aid)
+    except Exception as e:
+        if lang == "ru":
+            return await message.answer(f"❌ Ошибка при получении данных: <code>{esc(str(e))}</code>")
+        return await message.answer(f"❌ Error fetching asset data: <code>{esc(str(e))}</code>")
+
     if not info:
         if lang == "ru":
             return await message.answer("Предмет не найден.")
         return await message.answer("Asset not found.")
-    desc = esc((info.get("Description") or "")[:600])
-    c = info.get("Creator") or {}
+    
+    name = info.get("Name") or info.get("name") or "?"
+    description = info.get("Description") or info.get("description") or ""
+    price = info.get("PriceInRobux") or info.get("priceInRobux") or "N/A"
+    
+    # Creator field differs between APIs
+    creator = info.get("Creator") or {}
+    creator_name = creator.get("Name") or creator.get("name") or info.get("creatorName") or "?"
+    creator_id = creator.get("Id") or creator.get("targetId") or info.get("creatorTargetId") or "?"
+    
+    is_limited = info.get("IsLimited") or ("Limited" in (info.get("itemRestrictions") or []))
+    is_limited_u = info.get("IsLimitedUnique") or ("LimitedUnique" in (info.get("itemRestrictions") or []))
+    
+    desc = esc(str(description)[:600])
+
     if lang == "ru":
         text = (
-            f"🎩 <b>{esc(info.get('Name', '?'))}</b>\n"
+            f"🎩 <b>{esc(str(name))}</b>\n"
             f"🆔 ID: <code>{aid}</code>\n"
-            f"👤 Создатель: <code>{esc(c.get('Name', '?'))}</code> "
-            f"(<code>{c.get('Id', '?')}</code>)\n"
-            f"💰 Цена: <code>{info.get('PriceInRobux', 'N/A')}</code>\n"
-            f"♻️ Limited: <code>{info.get('IsLimited')}</code>\n"
-            f"♻️ LimitedU: <code>{info.get('IsLimitedUnique')}</code>\n"
+            f"👤 Создатель: <code>{esc(str(creator_name))}</code> "
+            f"(<code>{creator_id}</code>)\n"
+            f"💰 Цена: <code>{price}</code>\n"
+            f"♻️ Limited: <code>{is_limited}</code>\n"
+            f"♻️ LimitedU: <code>{is_limited_u}</code>\n"
             f"<a href=\"https://www.roblox.com/catalog/{aid}\">Открыть в каталоге</a>"
         )
         if desc:
             text += f"\n\n<b>📜 Описание:</b>\n{desc}"
     else:
         text = (
-            f"🎩 <b>{esc(info.get('Name', '?'))}</b>\n"
+            f"🎩 <b>{esc(str(name))}</b>\n"
             f"🆔 ID: <code>{aid}</code>\n"
-            f"👤 Creator: <code>{esc(c.get('Name', '?'))}</code> "
-            f"(<code>{c.get('Id', '?')}</code>)\n"
-            f"💰 Price: <code>{info.get('PriceInRobux', 'N/A')}</code>\n"
-            f"♻️ Limited: <code>{info.get('IsLimited')}</code>\n"
-            f"♻️ LimitedU: <code>{info.get('IsLimitedUnique')}</code>\n"
+            f"👤 Creator: <code>{esc(str(creator_name))}</code> "
+            f"(<code>{creator_id}</code>)\n"
+            f"💰 Price: <code>{price}</code>\n"
+            f"♻️ Limited: <code>{is_limited}</code>\n"
+            f"♻️ LimitedU: <code>{is_limited_u}</code>\n"
             f"<a href=\"https://www.roblox.com/catalog/{aid}\">Open in catalog</a>"
         )
         if desc:
             text += f"\n\n<b>📜 Description:</b>\n{desc}"
+
     icon = await roblox.get_asset_icon(aid)
     if icon:
         return await message.answer_photo(icon, caption=text)
     return await message.answer(text)
-
 
 @dp.message(Command("asseticon"))
 @track_command
