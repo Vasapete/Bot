@@ -27,8 +27,10 @@ from aiogram.types import (
     InlineKeyboardButton,
     BotCommand,
     CallbackQuery,
+    BufferedInputFile,          
 )
 from aiogram.client.default import DefaultBotProperties
+from aiogram.exceptions import TelegramNetworkError
 from aiohttp import ClientTimeout
 
 load_dotenv()
@@ -1136,6 +1138,7 @@ async def cmd_lastonline(message, command: CommandObject):
 async def cmd_avatar(message, command: CommandObject):
     lang = get_lang(message)
     name = (command.args or "").strip()
+
     if not name:
         if lang == "ru":
             return await message.answer(
@@ -1144,20 +1147,59 @@ async def cmd_avatar(message, command: CommandObject):
         return await message.answer(
             "/avatar &lt;Username&gt;\n→ Send avatar render\nExample: <code>/avatar d45wn</code>"
         )
+
     u = await roblox.get_user_by_username(name)
     if not u:
         if lang == "ru":
             return await message.answer("Пользователь не найден.")
         return await message.answer("User not found.")
+
     url = await roblox.get_user_thumbnail(u["id"], "avatar")
     if not url:
         if lang == "ru":
             return await message.answer("Не удалось получить аватар.")
         return await message.answer("No avatar thumbnail available.")
-    if lang == "ru":
-        await message.answer_photo(url, caption=f"🧍 Аватар <b>{esc(u['name'])}</b>")
-    else:
-        await message.answer_photo(url, caption=f"🧍 Avatar of <b>{esc(u['name'])}</b>")
+
+    try:
+        async with aiohttp.ClientSession(
+            timeout=aiohttp.ClientTimeout(total=15)
+        ) as session:
+            async with session.get(url) as resp:
+                if resp.status != 200:
+                    if lang == "ru":
+                        return await message.answer(f"Не удалось загрузить аватар (HTTP {resp.status}).")
+                    return await message.answer(f"Failed to download avatar (HTTP {resp.status}).")
+                image_data = await resp.read()
+
+        photo = BufferedInputFile(image_data, filename="avatar.png")
+
+        if lang == "ru":
+            await message.answer_photo(
+                photo,
+                caption=f"🧍 Аватар <b>{esc(u['name'])}</b>",
+                parse_mode="HTML"
+            )
+        else:
+            await message.answer_photo(
+                photo,
+                caption=f"🧍 Avatar of <b>{esc(u['name'])}</b>",
+                parse_mode="HTML"
+            )
+
+    except aiohttp.ClientError:
+        if lang == "ru":
+            return await message.answer("Ошибка загрузки аватара. Попробуйте позже.")
+        return await message.answer("Failed to download avatar. Please try again later.")
+
+    except TelegramNetworkError:
+        if lang == "ru":
+            return await message.answer("Telegram не успел отправить фото. Попробуйте ещё раз.")
+        return await message.answer("Telegram timed out sending the photo. Please try again.")
+
+    except Exception as e:
+        if lang == "ru":
+            return await message.answer(f"Неизвестная ошибка: {type(e).__name__}")
+        return await message.answer(f"Unexpected error: {type(e).__name__}")
 
 
 @dp.message(Command("headshot"))
