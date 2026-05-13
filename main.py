@@ -37,6 +37,7 @@ from aiogram.fsm.state import State, StatesGroup
 from aiogram.exceptions import TelegramForbiddenError, TelegramRetryAfter
 import logging
 logging.basicConfig(level=logging.INFO)
+from aiogram.filters import ChatType
 
 load_dotenv()
 TELEGRAM_TOKEN = os.getenv("TELEGRAM_TOKEN")
@@ -2586,7 +2587,22 @@ async def on_bot_chat_member_update(event):
     except Exception as e:
         logging.error(f"Error in chat member update: {e}")
 
+@dp.message(F.chat.type.in_({"group", "supergroup"}))
+async def handle_group_messages(message: Message):
+    pass
+
+
+@dp.message()
+async def handle_unknown(message: Message):
+    pass
+
 async def main():
+    try:
+        await bot.delete_webhook(drop_pending_updates=True)
+        logging.info("Webhook deleted, starting polling...")
+    except Exception as e:
+        logging.warning(f"Could not delete webhook: {e}")
+        
     await bot.set_my_commands(
         [
             BotCommand(command="start", description="Start / short help"),
@@ -2634,7 +2650,12 @@ async def main():
         ]
     )
     print("Bot running...")
-    await dp.start_polling(bot)
+    await dp.start_polling(
+        bot,
+        allowed_updates=dp.resolve_used_update_types(),
+        polling_timeout=30,
+        handle_as_tasks=True,
+    )
 
 
 if __name__ == "__main__":
