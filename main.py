@@ -27,18 +27,16 @@ from aiogram.types import (
     InlineKeyboardButton,
     BotCommand,
     CallbackQuery,
-    BufferedInputFile,          
+    BufferedInputFile,
 )
 from aiogram.client.default import DefaultBotProperties
-from aiogram.exceptions import TelegramNetworkError
+from aiogram.exceptions import TelegramNetworkError, TelegramForbiddenError, TelegramRetryAfter
 from aiohttp import ClientTimeout
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
-from aiogram.exceptions import TelegramForbiddenError, TelegramRetryAfter
 import logging
-logging.basicConfig(level=logging.INFO)
-from aiogram.filters import ChatType
 
+logging.basicConfig(level=logging.INFO)
 load_dotenv()
 TELEGRAM_TOKEN = os.getenv("TELEGRAM_TOKEN")
 if not TELEGRAM_TOKEN:
@@ -2586,7 +2584,7 @@ async def on_bot_chat_member_update(event):
 
     except Exception as e:
         logging.error(f"Error in chat member update: {e}")
-
+        
 @dp.message(F.chat.type.in_({"group", "supergroup"}))
 async def handle_group_messages(message: Message):
     pass
@@ -2595,7 +2593,7 @@ async def handle_group_messages(message: Message):
 @dp.message()
 async def handle_unknown(message: Message):
     pass
-
+    
 async def main():
     try:
         await bot.delete_webhook(drop_pending_updates=True)
@@ -2646,7 +2644,7 @@ async def main():
             BotCommand(command="owned", description="Check item ownership"),
             BotCommand(command="obtained", description="When badge was obtained"),
             BotCommand(command="offsales", description="Offsale info"),
-            BotCommand(command="links", description="Links (soon)"),
+            BotCommand(command="links", description="Links"),
         ]
     )
     print("Bot running...")
