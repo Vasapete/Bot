@@ -29,6 +29,9 @@ from aiogram.types import (
     CallbackQuery,
     BufferedInputFile,
     FSInputFile,
+    InlineQuery,
+    InlineQueryResultArticle,
+    InputTextMessageContent,
 )
 from aiogram.client.default import DefaultBotProperties
 from aiogram.exceptions import TelegramNetworkError, TelegramForbiddenError, TelegramRetryAfter
@@ -66,6 +69,23 @@ USER_IDS: Set[int] = set()
 USER_LANG: Dict[int, str] = {}
 import json
 
+async def safe_send(chat_id: int, text: str, **kwargs):
+    try:
+        await bot.send_message(chat_id, text, **kwargs)
+    except TelegramRetryAfter as e:
+        await asyncio.sleep(e.retry_after + 1)
+        try:
+            await bot.send_message(chat_id, text, **kwargs)
+        except Exception:
+            pass
+    except TelegramForbiddenError:
+        USER_IDS.discard(chat_id)
+        CHAT_IDS.discard(chat_id)
+        _save_set(USERS_FILE, USER_IDS)
+        _save_set(GROUPS_FILE, CHAT_IDS)
+    except Exception as e:
+        logging.error(f"safe_send to {chat_id}: {e}")
+        
 USERS_FILE = "known_users.json"
 GROUPS_FILE = "known_groups.json"
 
@@ -281,7 +301,7 @@ class RobloxAPI:
                         await asyncio.sleep(0.8 + attempt * 0.5)
                         continue
     
-                    if r.status == 403:
+                    if r.status in (400, 403, 404):
                         return None
     
                     raise RuntimeError(f"HTTP {r.status}: {data}")
@@ -449,33 +469,28 @@ class RobloxAPI:
 
     async def get_collectibles(self, uid: int):
         from urllib.parse import urlencode
-
         base = f"https://inventory.roblox.com/v1/users/{uid}/assets/collectibles"
         items = []
         cursor = None
-
+    
         while True:
             params = {"limit": 100, "sortOrder": "Asc"}
             if cursor:
                 params["cursor"] = cursor
-
             try:
                 data = await self.req("GET", base + "?" + urlencode(params))
             except RuntimeError as e:
-                # Inventory private → do not crash
-                if "permissions" in str(e) or "403" in str(e):
+                err = str(e)
+                # private inventory OR user doesn't exist - both return None
+                if "403" in err or "400" in err:
                     return None
                 raise
-
             if not data:
                 break
-
             items.extend(data.get("data", []))
             cursor = data.get("nextPageCursor")
-
             if not cursor:
                 break
-
         return items
 
 
@@ -575,8 +590,8 @@ async def compose_limiteds_text(uid: int, lang: str) -> str:
     total_rap = 0
     total_value = 0
     lines = []
-
-    for it in items:
+    
+    for it in items[:50]:
         aid = it.get("assetId")
         aname = esc(it.get("name", "Unknown"))
         rap = it.get("recentAveragePrice") or 0
@@ -617,6 +632,12 @@ async def compose_limiteds_text(uid: int, lang: str) -> str:
         )
         if roli_err:
             header += f"\n⚠️ Rolimons issue: <code>{esc(roli_err)}</code>\n"
+    if len(items) > 50:
+        if lang == "ru":
+            header += f"Показаны первые 50 из {len(items)} предметов\n"
+        else:
+            header += f"Showing first 50 of {len(items)} items\n"
+
 
     return header + "\n" + "\n".join(lines)
 
@@ -1289,10 +1310,9 @@ async def bc_all(cb: CallbackQuery, state: FSMContext):
     from_chat_id = data.get("from_chat_id")
     await state.clear()
 
-    await cb.message.edit_text("Starting global broadcast...")
-
-    # all targets
     targets = list(USER_IDS) + [cid for cid in CHAT_IDS if cid < 0]
+
+    await cb.message.edit_text(f"Sending to {len(targets)} recipients...")
 
     success = 0
     failed = 0
@@ -1307,15 +1327,9 @@ async def bc_all(cb: CallbackQuery, state: FSMContext):
             )
             success += 1
             await asyncio.sleep(0.05)
-        except TelegramForbiddenError:
-            blocked += 1
-            # remove blocked users/groups
-            USER_IDS.discard(chat_id)
-            CHAT_IDS.discard(chat_id)
-            _save_set(USERS_FILE, USER_IDS)
-            _save_set(GROUPS_FILE, CHAT_IDS)
+
         except TelegramRetryAfter as e:
-            await asyncio.sleep(e.retry_after)
+            await asyncio.sleep(e.retry_after + 1)
             try:
                 await bot.copy_message(
                     chat_id=chat_id,
@@ -1325,14 +1339,21 @@ async def bc_all(cb: CallbackQuery, state: FSMContext):
                 success += 1
             except Exception:
                 failed += 1
+
+        except TelegramForbiddenError:
+            blocked += 1
+            USER_IDS.discard(chat_id)
+            CHAT_IDS.discard(chat_id)
+            _save_set(USERS_FILE, USER_IDS)
+            _save_set(GROUPS_FILE, CHAT_IDS)
+
         except Exception as e:
             failed += 1
             logging.error(f"Broadcast failed for {chat_id}: {e}")
 
-    # save history
     BROADCAST_HISTORY.append({
         "date": dt.datetime.now(dt.timezone.utc).strftime("%Y-%m-%d %H:%M UTC"),
-        "type": "global",
+        "target": "global",
         "success": success,
         "failed": failed,
         "blocked": blocked,
@@ -2664,10 +2685,209 @@ async def cb_roli_stats(cb: CallbackQuery):
     try:
         uid = int(cb.data.split(":", 1)[1])
     except Exception:
-        return await cb.answer("Invalid data", show_alert=True)
-    text = await compose_limiteds_text(uid, lang)
-    await cb.message.answer(text)
-    await cb.answer()
+        return await cb.answer("Invalid", show_alert=True)
+
+    await cb.answer("Loading...")
+
+    try:
+        text = await compose_limiteds_text(uid, lang)
+
+        if len(text) > 4000:
+            chunks = [text[i:i+4000] for i in range(0, len(text), 4000)]
+            for chunk in chunks:
+                try:
+                    await cb.message.answer(chunk)
+                    await asyncio.sleep(0.5)
+                except TelegramRetryAfter as e:
+                    await asyncio.sleep(e.retry_after + 1)
+                    await cb.message.answer(chunk)
+        else:
+            try:
+                await cb.message.answer(text)
+            except TelegramRetryAfter as e:
+                await asyncio.sleep(e.retry_after + 1)
+                await cb.message.answer(text)
+
+    except Exception as e:
+        logging.error(f"cb_roli_stats uid={uid}: {e}")
+        await cb.message.answer(
+            "Не удалось загрузить лимитки." if lang == "ru" else "Failed to load limiteds.")
+
+@dp.inline_query()
+async def inline_handler(query: InlineQuery):
+    text = query.query.strip()
+
+    if not text:
+        # show hints when nothing typed
+        results = [
+            InlineQueryResultArticle(
+                id="hint_user",
+                title="user <username>",
+                description="Look up a Roblox user",
+                input_message_content=InputTextMessageContent(
+                    message_text="/user "
+                )
+            ),
+            InlineQueryResultArticle(
+                id="hint_limiteds",
+                title="limiteds <username>",
+                description="View user limiteds with RAP/Value",
+                input_message_content=InputTextMessageContent(
+                    message_text="/limiteds "
+                )
+            ),
+            InlineQueryResultArticle(
+                id="hint_item",
+                title="item <assetid>",
+                description="Look up a Roblox item",
+                input_message_content=InputTextMessageContent(
+                    message_text="/assetid "
+                )
+            ),
+        ]
+        return await query.answer(results, cache_time=1)
+
+    parts = text.split(None, 1)
+    cmd = parts[0].lower()
+    arg = parts[1].strip() if len(parts) > 1 else ""
+
+    if not arg:
+        await query.answer([], cache_time=1)
+        return
+
+    # user lookup
+    if cmd == "user":
+        try:
+            user = await roblox.get_user_details_by_username(arg)
+            if not user:
+                raise ValueError("not found")
+
+            uid = user["id"]
+            created = parse_iso8601(user["created"]).strftime("%Y-%m-%d")
+            banned = " BANNED" if user.get("isBanned") else ""
+
+            msg = (
+                f"<b>{esc(user['name'])}</b>{banned}\n"
+                f"ID: <code>{uid}</code>\n"
+                f"Display: {esc(user.get('displayName', ''))}\n"
+                f"Created: {created}\n"
+                f"Verified: {user.get('hasVerifiedBadge', False)}\n\n"
+                f"<a href=\"https://www.roblox.com/users/{uid}/profile\">Roblox</a> "
+                f"<a href=\"https://www.rolimons.com/player/{uid}\">Rolimons</a>"
+            )
+
+            results = [InlineQueryResultArticle(
+                id=f"user_{uid}",
+                title=f"{user['name']} (ID: {uid})",
+                description=f"Created: {created}{' | BANNED' if user.get('isBanned') else ''}",
+                input_message_content=InputTextMessageContent(
+                    message_text=msg,
+                    parse_mode="HTML"
+                )
+            )]
+        except Exception:
+            results = [InlineQueryResultArticle(
+                id="user_err",
+                title="User not found",
+                description=arg,
+                input_message_content=InputTextMessageContent(
+                    message_text=f"User <code>{esc(arg)}</code> not found.",
+                    parse_mode="HTML"
+                )
+            )]
+        return await query.answer(results, cache_time=30)
+
+    # limiteds lookup
+    if cmd == "limiteds":
+        try:
+            base = await roblox.get_user_by_username(arg)
+            if not base:
+                raise ValueError("not found")
+            uid = base["id"]
+            items = await roblox.get_collectibles(uid)
+
+            if items is None:
+                msg = f"<b>{esc(base['name'])}</b>\nInventory is private."
+            elif not items:
+                msg = f"<b>{esc(base['name'])}</b>\nNo limiteds."
+            else:
+                total_rap = sum(i.get("recentAveragePrice") or 0 for i in items)
+                msg = (
+                    f"<b>Limiteds of {esc(base['name'])}</b>\n"
+                    f"Items: <code>{len(items)}</code>\n"
+                    f"Total RAP: <code>{total_rap:,}</code>\n\n"
+                    f"<a href=\"https://www.rolimons.com/player/{uid}\">View on Rolimons</a>"
+                )
+
+            results = [InlineQueryResultArticle(
+                id=f"lim_{uid}",
+                title=f"Limiteds: {base['name']}",
+                description=f"{len(items) if items else 0} items" if items else "Private inventory",
+                input_message_content=InputTextMessageContent(
+                    message_text=msg,
+                    parse_mode="HTML"
+                )
+            )]
+        except Exception:
+            results = [InlineQueryResultArticle(
+                id="lim_err",
+                title="User not found",
+                description=arg,
+                input_message_content=InputTextMessageContent(
+                    message_text=f"User <code>{esc(arg)}</code> not found.",
+                    parse_mode="HTML"
+                )
+            )]
+        return await query.answer(results, cache_time=30)
+
+    # item lookup
+    if cmd == "item" and arg.isdigit():
+        try:
+            aid = int(arg)
+            info = await roblox.get_asset_info(aid)
+            if not info:
+                raise ValueError("not found")
+
+            name = info.get("Name") or info.get("name") or "?"
+            price = info.get("PriceInRobux") or "N/A"
+            creator = (info.get("Creator") or {})
+            creator_name = creator.get("Name") or "?"
+            is_limited = info.get("IsLimited") or False
+            is_limited_u = info.get("IsLimitedUnique") or False
+
+            msg = (
+                f"<b>{esc(str(name))}</b>\n"
+                f"ID: <code>{aid}</code>\n"
+                f"Creator: {esc(str(creator_name))}\n"
+                f"Price: <code>{price}</code>\n"
+                f"Limited: <code>{is_limited}</code>\n"
+                f"LimitedU: <code>{is_limited_u}</code>\n\n"
+                f"<a href=\"https://www.roblox.com/catalog/{aid}\">Open in catalog</a>"
+            )
+
+            results = [InlineQueryResultArticle(
+                id=f"item_{aid}",
+                title=str(name),
+                description=f"ID: {aid} | Price: {price} | Limited: {is_limited}",
+                input_message_content=InputTextMessageContent(
+                    message_text=msg,
+                    parse_mode="HTML"
+                )
+            )]
+        except Exception:
+            results = [InlineQueryResultArticle(
+                id="item_err",
+                title="Item not found",
+                description=f"Asset ID: {arg}",
+                input_message_content=InputTextMessageContent(
+                    message_text=f"Item <code>{esc(arg)}</code> not found.",
+                    parse_mode="HTML"
+                )
+            )]
+        return await query.answer(results, cache_time=30)
+
+    # nothing matched
+    await query.answer([], cache_time=1)
 
 
 @dp.callback_query(F.data.startswith("set_lang:"))
@@ -2706,17 +2926,13 @@ async def on_bot_chat_member_update(event):
 
     except Exception as e:
         logging.error(f"Error in chat member update: {e}")
-        
-@dp.message(F.chat.type.in_({"group", "supergroup"}))
-async def handle_group_messages(message: Message):
-    pass
-
-
-@dp.message()
-async def handle_unknown(message: Message):
-    pass
     
 async def main():
+    await dp.start_polling(
+    bot,
+    allowed_updates=["message", "callback_query", "my_chat_member", "inline_query"],
+    polling_timeout=30,
+    handle_as_tasks=True,)
     try:
         await bot.delete_webhook(drop_pending_updates=True)
         logging.info("Webhook deleted, starting polling...")
