@@ -593,7 +593,7 @@ async def compose_limiteds_text(uid: int, lang: str) -> str:
         total_value += value
 
         lines.append(
-            f"• <a href=\"https://www.rolimons.com/item/{aid}\">{aname}</a> — "
+            f"• <a href=\"https://www.rolimons.com/item/{aid}\">{aname}</a> - "
             f"RAP: <code>{rap:,}</code> | Value: <code>{value:,}</code>"
         )
 
@@ -1384,12 +1384,12 @@ async def cmd_announce(message: Message, command: CommandObject = None, state: F
         "📰 <b>Объявление / Новость</b>\n\n"
         "Отправь сообщение которое хочешь опубликовать как новость.\n"
         "Оно будет отправлено всем пользователям с префиксом 📰 <b>Новость</b>.\n\n"
-        "/cancel — отмена"
+        "/cancel - отмена"
         if lang == "ru" else
         "📰 <b>Announcement / News</b>\n\n"
         "Send the message to publish as a news announcement.\n"
         "It will be sent to all users with a 📰 <b>News</b> prefix.\n\n"
-        "/cancel — cancel",
+        "/cancel - cancel",
         parse_mode="HTML"
     )
     await state.set_state(AnnounceStates.waiting_for_message)
@@ -1985,7 +1985,7 @@ async def cmd_groups(message, command: CommandObject):
         role = g.get("role", {})
         lines.append(
             f"• {esc(group.get('name', '?'))} "
-            f"(<code>{group.get('id')}</code>) — role: <code>{esc(role.get('name', '?'))}</code>"
+            f"(<code>{group.get('id')}</code>) - role: <code>{esc(role.get('name', '?'))}</code>"
         )
     await message.answer("\n".join(lines))
 
@@ -2256,13 +2256,13 @@ async def cmd_language(message, command: CommandObject):
 
     text = (
         "🌐 <b>Language settings</b>\n\n"
-        "• 🇬🇧 English — /language en\n"
-        "• 🇷🇺 Russian — /language ru"
+        "• 🇬🇧 English - /language en\n"
+        "• 🇷🇺 Russian - /language ru"
         if lang_current == "en"
         else
         "🌐 <b>Смена языка</b>\n\n"
-        "• 🇬🇧 English — /language en\n"
-        "• 🇷🇺 Русский — /language ru"
+        "• 🇬🇧 English - /language en\n"
+        "• 🇷🇺 Русский - /language ru"
     )
 
     kb = InlineKeyboardMarkup(
@@ -2315,7 +2315,7 @@ async def cmd_names(message, command: CommandObject):
         created = entry.get("created")
         if created:
             created_str = parse_iso8601(created).strftime("%Y-%m-%d")
-            lines.append(f"• {uname} — {created_str}")
+            lines.append(f"• {uname} - {created_str}")
         else:
             lines.append(f"• {uname}")
     await message.answer("\n".join(lines))
@@ -2652,20 +2652,20 @@ async def cb_help_open(cb: CallbackQuery):
     if lang == "ru":
         txt = (
             "🧑‍🔧 Быстрый гайд:\n\n"
-            "/user <code>имя</code> — профиль\n"
-            "/limiteds <code>имя</code> — лимитки с RAP/Value\n"
-            "/rolimons <code>имя</code> — статистика Rolimons\n"
-            "/assetid <code>asset_id</code> — инфо о предмете\n"
-            "/devex <code>robux</code> — примерная сумма в $"
+            "/user <code>имя</code> - профиль\n"
+            "/limiteds <code>имя</code> - лимитки с RAP/Value\n"
+            "/rolimons <code>имя</code> - статистика Rolimons\n"
+            "/assetid <code>asset_id</code> - инфо о предмете\n"
+            "/devex <code>robux</code> - примерная сумма в $"
         )
     else:
         txt = (
             "🧑‍🔧 Quick usage:\n\n"
-            "/user <code>username</code> — full profile\n"
-            "/limiteds <code>username</code> — all limiteds with RAP & value\n"
-            "/rolimons <code>username</code> — Rolimons stats\n"
-            "/assetid <code>asset_id</code> — item info\n"
-            "/devex <code>robux</code> — approx cash value"
+            "/user <code>username</code> - full profile\n"
+            "/limiteds <code>username</code> - all limiteds with RAP & value\n"
+            "/rolimons <code>username</code> - Rolimons stats\n"
+            "/assetid <code>asset_id</code> - item info\n"
+            "/devex <code>robux</code> - approx cash value"
         )
     await cb.message.answer(txt)
     await cb.answer()
