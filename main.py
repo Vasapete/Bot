@@ -1081,7 +1081,6 @@ async def cmd_adminpanel(message: Message):
         "/userlist - dump all users as file\n"
         "/botstats - full bot statistics\n"
         "/test - run function tests\n"
-        "/smoketest - run API tests\n\n"
         f"Users in DB: <b>{len(USER_IDS)}</b>\n"
         f"Chats in DB: <b>{len(CHAT_IDS)}</b>"
     )
@@ -1217,84 +1216,72 @@ class BroadcastStates(StatesGroup):
 
 
 @dp.message(Command("broadcast"))
-@track_command
 async def cmd_broadcast(message: Message, command: CommandObject = None, state: FSMContext = None):
-    lang = get_lang(message)
-
     if not message.from_user or message.from_user.id != OWNER_ID:
-        return await message.answer(
-            "Эта команда доступна только владельцу бота." if lang == "ru"
-            else "This command is owner-only."
-        )
+        return
+
+    # block in groups
+    if message.chat.type in ("group", "supergroup"):
+        return await message.answer("Use /broadcast in private chat.")
 
     if state is None:
-        return await message.answer("State error. Please try again.")
+        return await message.answer("State error.")
+
+    users = len(USER_IDS)
+    groups = len([c for c in CHAT_IDS if c < 0])
+    total = users + groups
 
     await message.answer(
-        "📢 <b>Рассылка</b>\n\n"
-        "Отправь сообщение которое хочешь разослать.\n"
-        "Можно отправить: текст, фото, видео, стикер.\n\n"
-        "Отправь /cancel для отмены."
-        if lang == "ru" else
-        "📢 <b>Broadcast</b>\n\n"
-        "Send the message you want to broadcast.\n"
-        "You can send: text, photo, video, sticker.\n\n"
-        "Send /cancel to cancel.",
-        parse_mode="HTML"
+        f"<b>Global Broadcast</b>\n\n"
+        f"Users: <b>{users}</b>\n"
+        f"Groups: <b>{groups}</b>\n"
+        f"Total: <b>{total}</b>\n\n"
+        f"Send the message to broadcast.\n"
+        f"/cancel to cancel."
     )
     await state.set_state(BroadcastStates.waiting_for_message)
 
+
 @dp.message(BroadcastStates.waiting_for_message)
 async def broadcast_get_message(message: Message, state: FSMContext):
-    lang = get_lang(message)
-
-    if message.text and message.text == "/cancel":
+    if message.text and message.text.strip() == "/cancel":
         await state.clear()
-        return await message.answer(
-            "❌ Рассылка отменена." if lang == "ru" else "❌ Broadcast cancelled."
-        )
+        return await message.answer("Cancelled.")
 
     await state.update_data(
         message_id=message.message_id,
         from_chat_id=message.chat.id
     )
 
-    total = len(USER_IDS)
+    users = len(USER_IDS)
+    groups = len([c for c in CHAT_IDS if c < 0])
 
     kb = InlineKeyboardMarkup(inline_keyboard=[
-        [
-            InlineKeyboardButton(
-                text="✅ Отправить" if lang == "ru" else "✅ Send",
-                callback_data="broadcast_confirm"
-            ),
-            InlineKeyboardButton(
-                text="❌ Отмена" if lang == "ru" else "❌ Cancel",
-                callback_data="broadcast_cancel"
-            )
-        ]
+        [InlineKeyboardButton(text=f"Send to ALL ({users + groups})", callback_data="bc_all")],
+        [InlineKeyboardButton(text="Cancel", callback_data="bc_cancel")],
     ])
 
     await message.answer(
-        f"📢 <b>{'Подтверждение' if lang == 'ru' else 'Confirm Broadcast'}</b>\n\n"
-        f"{'Получателей' if lang == 'ru' else 'Recipients'}: <b>{total}</b>\n\n"
-        f"{'Отправить это сообщение всем?' if lang == 'ru' else 'Send this message to everyone?'}",
-        parse_mode="HTML",
+        f"<b>Confirm broadcast</b>\n\n"
+        f"Total recipients: <b>{users + groups}</b>\n"
+        f"Users: {users} | Groups: {groups}\n\n"
+        f"Send this message to everyone?",
         reply_markup=kb
     )
     await state.set_state(BroadcastStates.confirming)
 
 
-@dp.callback_query(F.data == "broadcast_cancel")
-async def broadcast_cancel_cb(callback: CallbackQuery, state: FSMContext):
-    if callback.from_user.id != OWNER_ID:
+@dp.callback_query(F.data == "bc_cancel")
+async def bc_cancel(cb: CallbackQuery, state: FSMContext):
+    if cb.from_user.id != OWNER_ID:
         return
     await state.clear()
-    await callback.message.edit_text("❌ Broadcast cancelled.")
+    await cb.message.edit_text("Cancelled.")
 
 
-@dp.callback_query(F.data == "broadcast_confirm")
-async def broadcast_confirm_cb(callback: CallbackQuery, state: FSMContext, bot: Bot):
-    if callback.from_user.id != OWNER_ID:
+@dp.callback_query(F.data == "bc_all")
+async def bc_all(cb: CallbackQuery, state: FSMContext):
+    if cb.from_user.id != OWNER_ID:
         return
 
     data = await state.get_data()
@@ -1302,63 +1289,63 @@ async def broadcast_confirm_cb(callback: CallbackQuery, state: FSMContext, bot: 
     from_chat_id = data.get("from_chat_id")
     await state.clear()
 
-    await callback.message.edit_text("📤 Broadcasting... Please wait.")
+    await cb.message.edit_text("Starting global broadcast...")
+
+    # all targets
+    targets = list(USER_IDS) + [cid for cid in CHAT_IDS if cid < 0]
 
     success = 0
     failed = 0
     blocked = 0
 
-    # Send only to private chats (positive IDs = users)
-    user_list = [uid for uid in USER_IDS if uid > 0]
-
-    for user_id in user_list:
+    for chat_id in targets:
         try:
             await bot.copy_message(
-                chat_id=user_id,
+                chat_id=chat_id,
                 from_chat_id=from_chat_id,
                 message_id=message_id
             )
             success += 1
             await asyncio.sleep(0.05)
-
         except TelegramForbiddenError:
             blocked += 1
-            USER_IDS.discard(user_id)  # Remove blocked users
-
+            # remove blocked users/groups
+            USER_IDS.discard(chat_id)
+            CHAT_IDS.discard(chat_id)
+            _save_set(USERS_FILE, USER_IDS)
+            _save_set(GROUPS_FILE, CHAT_IDS)
         except TelegramRetryAfter as e:
             await asyncio.sleep(e.retry_after)
             try:
                 await bot.copy_message(
-                    chat_id=user_id,
+                    chat_id=chat_id,
                     from_chat_id=from_chat_id,
                     message_id=message_id
                 )
                 success += 1
             except Exception:
                 failed += 1
-
         except Exception as e:
             failed += 1
-            logging.error(f"Broadcast failed for {user_id}: {e}")
+            logging.error(f"Broadcast failed for {chat_id}: {e}")
 
-    # Save to broadcast history
+    # save history
     BROADCAST_HISTORY.append({
         "date": dt.datetime.now(dt.timezone.utc).strftime("%Y-%m-%d %H:%M UTC"),
+        "type": "global",
         "success": success,
-        "failed": failed + blocked
+        "failed": failed,
+        "blocked": blocked,
     })
-
-    # Keep only last 10 broadcasts in memory
     if len(BROADCAST_HISTORY) > 10:
         BROADCAST_HISTORY.pop(0)
 
-    await callback.message.edit_text(
-        f"📢 <b>Broadcast Complete!</b>\n\n"
-        f"✅ Sent: <b>{success}</b>\n"
-        f"🚫 Blocked: <b>{blocked}</b>\n"
-        f"❌ Failed: <b>{failed}</b>\n"
-        f"👥 Total attempted: <b>{len(user_list)}</b>",
-        parse_mode="HTML"
+    await cb.message.edit_text(
+        f"<b>Broadcast Complete</b>\n\n"
+        f"Sent: {success}\n"
+        f"Blocked: {blocked}\n"
+        f"Failed: {failed}\n"
+        f"Total attempted: {len(targets)}"
     )
 
 class AnnounceStates(StatesGroup):
