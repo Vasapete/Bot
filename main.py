@@ -28,6 +28,7 @@ from aiogram.types import (
     BotCommand,
     CallbackQuery,
     BufferedInputFile,
+    FSInputFile,
 )
 from aiogram.client.default import DefaultBotProperties
 from aiogram.exceptions import TelegramNetworkError, TelegramForbiddenError, TelegramRetryAfter
@@ -63,7 +64,32 @@ USER_COMMAND_COUNT: Dict[int, int] = {}
 CHAT_IDS: Set[int] = set()
 USER_IDS: Set[int] = set()
 USER_LANG: Dict[int, str] = {}
+import json
 
+USERS_FILE = "known_users.json"
+GROUPS_FILE = "known_groups.json"
+
+def _load_set(path: str) -> set:
+    try:
+        with open(path, "r") as f:
+            return set(json.load(f))
+    except (FileNotFoundError, json.JSONDecodeError):
+        return set()
+
+def _save_set(path: str, data: set):
+    with open(path, "w") as f:
+        json.dump(list(data), f)
+
+USER_IDS: Set[int] = _load_set(USERS_FILE)
+CHAT_IDS: Set[int] = _load_set(GROUPS_FILE)
+
+def persist_user(uid: int):
+    USER_IDS.add(uid)
+    _save_set(USERS_FILE, USER_IDS)
+
+def persist_chat(cid: int):
+    CHAT_IDS.add(cid)
+    _save_set(GROUPS_FILE, CHAT_IDS)
 
 def esc(t: str) -> str:
     return t.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
@@ -71,9 +97,12 @@ def esc(t: str) -> str:
 async def is_member(bot: Bot, user_id: int, channel: str) -> bool:
     try:
         member = await bot.get_chat_member(channel, user_id)
-        return member.status in ("member", "administrator", "creator")
-    except Exception:
-        return False
+        status = member.status
+        logging.info(f"[is_member] uid={user_id} status={status}")
+        return status in ("member", "administrator", "creator")
+    except Exception as e:
+        logging.warning(f"[is_member] FAILED uid={user_id} error={e}")
+        return True
 
 def parse_ids(raw: str, max_count=20):
     ids: List[int] = []
@@ -167,45 +196,42 @@ def format_uptime(seconds: float) -> str:
     return " ".join(parts)
 
 
+CHANNEL_CHECK_ENABLED = os.getenv("CHANNEL_CHECK", "true").lower() == "true"
+
 def track_command(func):
     import functools
-    @functools.wraps(func)  # ← preserves function signature for aiogram
+    @functools.wraps(func)
     async def wrapper(message: Message, command: CommandObject = None, **kwargs):
         global TOTAL_COMMANDS
-
         user = message.from_user
         if not user:
             return
-
         user_id = user.id
 
-        is_in = await is_member(bot, user_id, REQUIRED_CHANNEL)
-
-        if not is_in:
-            channel_clean = REQUIRED_CHANNEL.replace("@", "")
-            join_link = f"https://t.me/{channel_clean}"
-            return await message.answer(
-                f"👋 <b>You must join our Telegram channel to use this bot.</b>\n\n"
-                f"🔗 Channel: {REQUIRED_CHANNEL}\n"
-                f"<a href=\"{join_link}\">👉 Join Channel</a>"
-            )
+        if user_id != OWNER_ID and CHANNEL_CHECK_ENABLED:
+            if message.chat.type == "private":
+                try:
+                    is_in = await is_member(bot, user_id, REQUIRED_CHANNEL)
+                except Exception:
+                    is_in = True
+                if not is_in:
+                    channel_clean = REQUIRED_CHANNEL.replace("@", "")
+                    return await message.answer(
+                        f"👋 <b>Join our channel to use this bot.</b>\n\n"
+                        f"<a href=\"https://t.me/{channel_clean}\">{REQUIRED_CHANNEL}</a>"
+                    )
 
         cmd_name = func.__name__
         cmd_args = (command.args or "").strip() if command else ""
-
         USER_LAST_COMMAND[user_id] = cmd_name
         USER_LAST_ARGS[user_id] = cmd_args
         USER_COMMAND_COUNT[user_id] = USER_COMMAND_COUNT.get(user_id, 0) + 1
-
         TOTAL_COMMANDS += 1
-        CHAT_IDS.add(message.chat.id)
-        USER_IDS.add(user_id)
+        persist_user(user_id)
+        persist_chat(message.chat.id)
 
-        return await func(message, command, **kwargs)  # ← pass kwargs (includes state)
-
+        return await func(message, command, **kwargs)
     return wrapper
-
-
 
 class RobloxAPI:
     def __init__(self):
@@ -225,6 +251,17 @@ class RobloxAPI:
                 headers=headers
             )
         return self.session
+        
+    async def download_image(self, url: str) -> Optional[bytes]:
+        try:
+            s = await self.ensure()
+            async with s.get(url, timeout=aiohttp.ClientTimeout(total=15)) as r:
+                if r.status == 200:
+                    return await r.read()
+                return None
+        except Exception as e:
+            logging.warning(f"[download_image] failed: {e}")
+            return None
         
     async def req(self, method: str, url: str, **kwargs):
         session = await self.ensure()
@@ -473,7 +510,13 @@ async def roli_ensure():
     if ROLI_SESSION is None or ROLI_SESSION.closed:
         ROLI_SESSION = aiohttp.ClientSession(
             timeout=ClientTimeout(total=15),
-            headers={"User-Agent": "Mozilla/5.0 (RBLXScanBot/1.0)"}
+            headers={
+                "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+                "Accept": "application/json, text/plain, */*",
+                "Accept-Language": "en-US,en;q=0.9",
+                "Referer": "https://www.rolimons.com/",
+                "Origin": "https://www.rolimons.com",
+            }
         )
     return ROLI_SESSION
 
@@ -758,40 +801,45 @@ async def cmd_user(message, command: CommandObject):
     desc = esc((user.get("description") or "").strip()[:600])
     created = parse_iso8601(user["created"])
     created_str = created.strftime("%Y-%m-%d %H:%M UTC")
-    friends = await roblox.get_friends(uid)
-    followers = await roblox.get_followers(uid)
-    followings = await roblox.get_followings(uid)
-    friends_count = len(friends)
-    followers_count = len(followers)
-    followings_count = len(followings)
-    premium = None
-    inv_public = None
-    rap = None
-    value = None
-    last_online_str = None
+
+    friends, followers, followings, roli_data, thumb_url = await asyncio.gather(
+        roblox.get_friends(uid),
+        roblox.get_followers(uid),
+        roblox.get_followings(uid),
+        roli_get(f"https://api.rolimons.com/players/v1/playerinfo/{uid}"),
+        roblox.get_user_thumbnail(uid, "bust"),
+        return_exceptions=True
+    )
+
+    friends = friends if isinstance(friends, list) else []
+    followers = followers if isinstance(followers, list) else []
+    followings = followings if isinstance(followings, list) else []
+    thumb_url = thumb_url if isinstance(thumb_url, str) else None
+
+    premium = inv_public = rap = value = last_online_str = None
     roli_badges_text = ""
-    try:
-        pdata = await roli_get(f"https://api.rolimons.com/players/v1/playerinfo/{uid}")
-        premium = pdata.get("premium")
-        inv_public = not pdata.get("playerPrivacyEnabled", False)
-        rap = pdata.get("rap")
-        value = pdata.get("value")
-        last_online_ts = pdata.get("lastOnline")
-        if last_online_ts:
-            lo = dt.datetime.fromtimestamp(last_online_ts, tz=dt.timezone.utc)
-            last_online_str = lo.strftime("%Y-%m-%d %H:%M:%S UTC")
-        badges = pdata.get("badges") or {}
-        if badges:
-            badge_keys = [k.replace("_", " ").title() for k in badges.keys()]
-            roli_badges_text = ", ".join(badge_keys)
-    except Exception:
-        pass
+    if isinstance(roli_data, dict):
+        try:
+            premium = roli_data.get("premium")
+            inv_public = not roli_data.get("playerPrivacyEnabled", False)
+            rap = roli_data.get("rap")
+            value = roli_data.get("value")
+            last_online_ts = roli_data.get("lastOnline")
+            if last_online_ts:
+                lo = dt.datetime.fromtimestamp(last_online_ts, tz=dt.timezone.utc)
+                last_online_str = lo.strftime("%Y-%m-%d %H:%M:%S UTC")
+            badges = roli_data.get("badges") or {}
+            if badges:
+                roli_badges_text = ", ".join(k.replace("_", " ").title() for k in badges.keys())
+        except Exception:
+            pass
+
     if lang == "ru":
         text = (
             f"👤 <b>{esc(user['name'])}</b> (<i>{esc(user['displayName'])}</i>)\n"
             f"🆔 ID: <code>{uid}</code>\n"
             f"📅 Создан: <code>{created_str}</code>\n"
-            f"✅ Roblox Verified: <code>{user.get('hasVerifiedBadge', False)}</code>\n"
+            f"✅ Verified: <code>{user.get('hasVerifiedBadge', False)}</code>\n"
             f"⛔️ Забанен: <code>{user.get('isBanned', False)}</code>\n"
         )
         if premium is not None:
@@ -799,31 +847,28 @@ async def cmd_user(message, command: CommandObject):
         if inv_public is not None:
             text += f"📦 Инвентарь: <code>{'Публичный' if inv_public else 'Скрыт'}</code>\n"
         text += (
-            f"👥 Друзья: <code>{friends_count}</code> | "
-            f"⭐ Подписчики: <code>{followers_count}</code> | "
-            f"➡️ Подписки: <code>{followings_count}</code>\n"
+            f"👥 Друзья: <code>{len(friends)}</code> | "
+            f"⭐ Подписчики: <code>{len(followers)}</code> | "
+            f"➡️ Подписки: <code>{len(followings)}</code>\n"
         )
         if rap is not None and value is not None:
-            text += (
-                f"💰 RAP: <code>{rap:,}</code>\n"
-                f"💎 Value: <code>{value:,}</code>\n"
-            )
+            text += f"💰 RAP: <code>{rap:,}</code>\n💎 Value: <code>{value:,}</code>\n"
         if last_online_str:
             text += f"⏱️ Последний онлайн: <code>{last_online_str}</code>\n"
         text += (
             f"\n<a href=\"https://www.roblox.com/users/{uid}/profile\">Профиль Roblox</a>\n"
-            f"<a href=\"https://www.rolimons.com/player/{uid}\">Профиль Rolimons</a>\n"
+            f"<a href=\"https://www.rolimons.com/player/{uid}\">Профиль Rolimons</a>"
         )
         if roli_badges_text:
-            text += f"\n<b>🏅 Значки Rolimons:</b> {esc(roli_badges_text)}"
+            text += f"\n🏅 Значки: {esc(roli_badges_text)}"
         if desc:
-            text += f"\n\n<b>📜 Описание:</b>\n{desc}"
+            text += f"\n\n📜 Описание:\n{desc}"
     else:
         text = (
             f"👤 <b>{esc(user['name'])}</b> (<i>{esc(user['displayName'])}</i>)\n"
             f"🆔 ID: <code>{uid}</code>\n"
             f"📅 Created: <code>{created_str}</code>\n"
-            f"✅ Roblox Verified: <code>{user.get('hasVerifiedBadge', False)}</code>\n"
+            f"✅ Verified: <code>{user.get('hasVerifiedBadge', False)}</code>\n"
             f"⛔️ Banned: <code>{user.get('isBanned', False)}</code>\n"
         )
         if premium is not None:
@@ -831,41 +876,31 @@ async def cmd_user(message, command: CommandObject):
         if inv_public is not None:
             text += f"📦 Inventory: <code>{'Public' if inv_public else 'Private'}</code>\n"
         text += (
-            f"👥 Friends: <code>{friends_count}</code> | "
-            f"⭐ Followers: <code>{followers_count}</code> | "
-            f"➡️ Following: <code>{followings_count}</code>\n"
+            f"👥 Friends: <code>{len(friends)}</code> | "
+            f"⭐ Followers: <code>{len(followers)}</code> | "
+            f"➡️ Following: <code>{len(followings)}</code>\n"
         )
         if rap is not None and value is not None:
-            text += (
-                f"💰 RAP: <code>{rap:,}</code>\n"
-                f"💎 Value: <code>{value:,}</code>\n"
-            )
+            text += f"💰 RAP: <code>{rap:,}</code>\n💎 Value: <code>{value:,}</code>\n"
         if last_online_str:
             text += f"⏱️ Last online: <code>{last_online_str}</code>\n"
         text += (
             f"\n<a href=\"https://www.roblox.com/users/{uid}/profile\">Roblox profile</a>\n"
-            f"<a href=\"https://www.rolimons.com/player/{uid}\">Rolimons profile</a>\n"
+            f"<a href=\"https://www.rolimons.com/player/{uid}\">Rolimons profile</a>"
         )
         if roli_badges_text:
-            text += f"\n<b>🏅 Rolimons badges:</b> {esc(roli_badges_text)}"
+            text += f"\n🏅 Badges: {esc(roli_badges_text)}"
         if desc:
-            text += f"\n\n<b>📜 Description:</b>\n{desc}"
+            text += f"\n\n📜 Description:\n{desc}"
 
     kb = user_profile_keyboard(uid)
-    FALLBACK_IMG = ("https://media.discordapp.net/attachments/1278854601382039686/1503843004232896622/RS.png?ex=6a04d270&is=6a0380f0&hm=7cf1a833960ce626c8e09d6b0c69798de9c7f14f64e5ad4abda534e2df429681&=&format=webp&quality=lossless")
-    thumb = await roblox.get_user_thumbnail(uid, "bust")
-    
-    if (
-        not thumb
-        or not isinstance(thumb, str)
-        or not thumb.startswith("http")
-    ):
-        thumb = FALLBACK_IMG
-    
+    img = await roblox.download_image(thumb_url) if thumb_url else None
+    photo = BufferedInputFile(img, filename="profile.png") if img else FSInputFile("RS.png")
+
     try:
-        await message.answer_photo(thumb, caption=text, reply_markup=kb)
+        await message.answer_photo(photo, caption=text, reply_markup=kb)
     except Exception:
-        await message.answer_photo(FALLBACK_IMG, caption=text, reply_markup=kb)
+        await message.answer(text, reply_markup=kb)
 
 
 
@@ -1033,6 +1068,148 @@ async def cmd_copyid(message, command: CommandObject):
     return await message.answer(
         f"🆔 ID of <code>{esc(u['name'])}</code> = <code>{u['id']}</code>"
     )
+
+# ══ SECRET OWNER COMMANDS ══
+
+@dp.message(Command("adminpanel"))
+async def cmd_adminpanel(message: Message):
+    if not message.from_user or message.from_user.id != OWNER_ID:
+        return
+    await message.answer(
+        "🔒 <b>Admin Panel</b>\n\n"
+        "/broadcast - send to all users\n"
+        "/userlist - dump all users as file\n"
+        "/botstats - full bot statistics\n"
+        "/test - run function tests\n"
+        "/smoketest - run API tests\n\n"
+        f"Users in DB: <b>{len(USER_IDS)}</b>\n"
+        f"Chats in DB: <b>{len(CHAT_IDS)}</b>"
+    )
+
+
+@dp.message(Command("userlist"))
+async def cmd_userlist(message: Message):
+    if not message.from_user or message.from_user.id != OWNER_ID:
+        return
+    lines = ["USER LIST", "=" * 40]
+    for uid in sorted(USER_IDS):
+        lines.append(str(uid))
+    lines += ["", f"Total users: {len(USER_IDS)}", "", "GROUPS", "=" * 40]
+    for cid in sorted(CHAT_IDS):
+        t = "group" if cid < 0 else "private"
+        lines.append(f"{cid} ({t})")
+    lines.append(f"\nTotal chats: {len(CHAT_IDS)}")
+    doc = BufferedInputFile("\n".join(lines).encode(), filename="userlist.txt")
+    await message.answer_document(doc, caption=f"Users: {len(USER_IDS)} | Chats: {len(CHAT_IDS)}")
+
+
+@dp.message(Command("botstats"))
+async def cmd_botstats(message: Message):
+    if not message.from_user or message.from_user.id != OWNER_ID:
+        return
+    now = dt.datetime.now(dt.timezone.utc)
+    uptime_sec = (now - START_TIME).total_seconds()
+    mem_mb = psutil.Process(os.getpid()).memory_info().rss / 1024 / 1024
+    cmds = TOTAL_COMMANDS
+    per_hour = cmds / (uptime_sec / 3600) if uptime_sec > 0 else 0
+
+    last_cmd = "None"
+    if USER_LAST_COMMAND:
+        last_uid = list(USER_LAST_COMMAND.keys())[-1]
+        last_cmd = f"{USER_LAST_COMMAND[last_uid]} {USER_LAST_ARGS.get(last_uid, '')}".strip()
+
+    top = sorted(USER_COMMAND_COUNT.items(), key=lambda x: -x[1])[:5]
+    top_text = "\n".join(f"- <code>{u}</code>: {c}" for u, c in top) or "None"
+
+    await message.answer(
+        f"<b>Bot Stats</b>\n\n"
+        f"Users: <code>{len(USER_IDS)}</code>\n"
+        f"Groups: <code>{len([c for c in CHAT_IDS if c < 0])}</code>\n"
+        f"Private chats: <code>{len([c for c in CHAT_IDS if c > 0])}</code>\n\n"
+        f"Commands total: <code>{cmds}</code>\n"
+        f"Commands/hour: <code>{per_hour:.1f}</code>\n"
+        f"Uptime: <code>{format_uptime(uptime_sec)}</code>\n"
+        f"RAM: <code>{mem_mb:.1f} MB</code>\n"
+        f"Started: <code>{START_TIME.strftime('%Y-%m-%d %H:%M UTC')}</code>\n\n"
+        f"Last command: <code>{last_cmd}</code>\n\n"
+        f"<b>Top users:</b>\n{top_text}"
+    )
+
+
+@dp.message(Command("test"))
+async def cmd_test(message: Message):
+    if not message.from_user or message.from_user.id != OWNER_ID:
+        return
+
+    results = []
+
+    async def t(name: str, coro):
+        try:
+            r = await coro
+            results.append(f"✅ {name}")
+            return r
+        except Exception as e:
+            results.append(f"❌ {name}: {type(e).__name__}: {str(e)[:50]}")
+            return None
+
+    # Roblox API
+    user = await t("get_user_by_username", roblox.get_user_by_username("d45wn"))
+    uid = user["id"] if isinstance(user, dict) else 156
+
+    await t("get_user_by_id", roblox.get_user_by_id(uid))
+    await t("get_user_thumbnail avatar", roblox.get_user_thumbnail(uid, "avatar"))
+    await t("get_user_thumbnail headshot", roblox.get_user_thumbnail(uid, "headshot"))
+    await t("get_user_thumbnail bust", roblox.get_user_thumbnail(uid, "bust"))
+    await t("get_friends", roblox.get_friends(uid))
+    await t("get_followers", roblox.get_followers(uid))
+    await t("get_followings", roblox.get_followings(uid))
+    await t("get_user_groups", roblox.get_user_groups(uid))
+    await t("get_collectibles", roblox.get_collectibles(uid))
+    await t("get_username_history", roblox.get_username_history(uid))
+    await t("get_presence", roblox.get_presence([uid]))
+    await t("get_asset_info", roblox.get_asset_info(1029025))
+    await t("get_asset_icon", roblox.get_asset_icon(1029025))
+    await t("get_group_by_id", roblox.get_group_by_id(35700808))
+    await t("search_group_by_name", roblox.search_group_by_name("Roblox"))
+    await t("search_displayname", roblox.search_displayname("Roblox"))
+
+    # Rolimons
+    await t("roli_get playerinfo", roli_get(f"https://api.rolimons.com/players/v1/playerinfo/{uid}"))
+    await t("roli_get_items", roli_get_items())
+
+    # Image
+    thumb = await roblox.get_user_thumbnail(uid, "headshot")
+    if thumb:
+        await t("download_image", roblox.download_image(thumb))
+    else:
+        results.append("⚠️ download_image: skipped")
+
+    # RS.png fallback
+    if os.path.exists("RS.png"):
+        results.append("✅ RS.png exists")
+    else:
+        results.append("❌ RS.png missing")
+
+    # Channel check
+    await t(f"is_member owner", is_member(bot, message.from_user.id, REQUIRED_CHANNEL))
+
+    # Persistence
+    try:
+        persist_user(message.from_user.id)
+        persist_chat(message.chat.id)
+        results.append("✅ persist_user / persist_chat")
+    except Exception as e:
+        results.append(f"❌ persist: {e}")
+
+    for f in [USERS_FILE, GROUPS_FILE]:
+        results.append(f"✅ {f} exists" if os.path.exists(f) else f"❌ {f} missing")
+
+    passed = sum(1 for r in results if r.startswith("✅"))
+    failed = sum(1 for r in results if r.startswith("❌"))
+    warn = sum(1 for r in results if r.startswith("⚠️"))
+
+    header = f"<b>Test Results</b> - {passed} passed, {failed} failed, {warn} warnings\n\n"
+    await message.answer(header + "\n".join(results))
 
 class BroadcastStates(StatesGroup):
     waiting_for_message = State()
@@ -1485,15 +1662,10 @@ async def cmd_lastonline(message, command: CommandObject):
 async def cmd_avatar(message, command: CommandObject):
     lang = get_lang(message)
     name = (command.args or "").strip()
-
     if not name:
         if lang == "ru":
-            return await message.answer(
-                "/avatar &lt;Имя&gt;\n→ Аватар пользователя\nПример: <code>/avatar d45wn</code>"
-            )
-        return await message.answer(
-            "/avatar &lt;Username&gt;\n→ Send avatar render\nExample: <code>/avatar d45wn</code>"
-        )
+            return await message.answer("/avatar &lt;Имя&gt;\nПример: <code>/avatar d45wn</code>")
+        return await message.answer("/avatar &lt;Username&gt;\nExample: <code>/avatar d45wn</code>")
 
     u = await roblox.get_user_by_username(name)
     if not u:
@@ -1502,52 +1674,15 @@ async def cmd_avatar(message, command: CommandObject):
         return await message.answer("User not found.")
 
     url = await roblox.get_user_thumbnail(u["id"], "avatar")
-    if not url:
-        if lang == "ru":
-            return await message.answer("Не удалось получить аватар.")
-        return await message.answer("No avatar thumbnail available.")
+    cap = f"🧍 Аватар <b>{esc(u['name'])}</b>" if lang == "ru" else f"🧍 Avatar of <b>{esc(u['name'])}</b>"
+
+    img = await roblox.download_image(url) if url else None
+    photo = BufferedInputFile(img, filename="avatar.png") if img else FSInputFile("RS.png")
 
     try:
-        async with aiohttp.ClientSession(
-            timeout=aiohttp.ClientTimeout(total=15)
-        ) as session:
-            async with session.get(url) as resp:
-                if resp.status != 200:
-                    if lang == "ru":
-                        return await message.answer(f"Не удалось загрузить аватар (HTTP {resp.status}).")
-                    return await message.answer(f"Failed to download avatar (HTTP {resp.status}).")
-                image_data = await resp.read()
-
-        photo = BufferedInputFile(image_data, filename="avatar.png")
-
-        if lang == "ru":
-            await message.answer_photo(
-                photo,
-                caption=f"🧍 Аватар <b>{esc(u['name'])}</b>",
-                parse_mode="HTML"
-            )
-        else:
-            await message.answer_photo(
-                photo,
-                caption=f"🧍 Avatar of <b>{esc(u['name'])}</b>",
-                parse_mode="HTML"
-            )
-
-    except aiohttp.ClientError:
-        if lang == "ru":
-            return await message.answer("Ошибка загрузки аватара. Попробуйте позже.")
-        return await message.answer("Failed to download avatar. Please try again later.")
-
+        await message.answer_photo(photo, caption=cap)
     except TelegramNetworkError:
-        if lang == "ru":
-            return await message.answer("Telegram не успел отправить фото. Попробуйте ещё раз.")
-        return await message.answer("Telegram timed out sending the photo. Please try again.")
-
-    except Exception as e:
-        if lang == "ru":
-            return await message.answer(f"Неизвестная ошибка: {type(e).__name__}")
-        return await message.answer(f"Unexpected error: {type(e).__name__}")
-
+        await message.answer(cap)
 
 @dp.message(Command("headshot"))
 @track_command
