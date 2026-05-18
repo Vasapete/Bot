@@ -392,18 +392,19 @@ class RobloxAPI:
         if not data or not data.get("data"):
             return None
         return data["data"][0]["imageUrl"]
+        
 
 
     async def get_asset_resellers(self, aid: int):
-    """Get current resell listings for limited items"""
-    try:
-        data = await self.req(
-            "GET",
-            f"https://economy.roblox.com/v1/assets/{aid}/resellers?limit=10"
-        )
-        return data.get("data", []) if data else []
-    except Exception:
-        return []
+        """Get current resell listings for limited items"""
+        try:
+            data = await self.req(
+                "GET",
+                f"https://economy.roblox.com/v1/assets/{aid}/resellers?limit=10"
+            )
+            return data.get("data", []) if data else []
+        except Exception:
+            return []
 
     async def get_asset_favorites(self, aid: int):
         try:
