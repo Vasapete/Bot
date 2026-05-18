@@ -588,7 +588,6 @@ async def roli_get_items():
     global ROLI_ITEMS_CACHE
     if ROLI_ITEMS_CACHE is not None:
         return ROLI_ITEMS_CACHE
-    # use v3
     data = await roli_get("https://api.rolimons.com/items/v3/itemdetails")
     ROLI_ITEMS_CACHE = data.get("items", {}) if data else {}
     return ROLI_ITEMS_CACHE
@@ -644,9 +643,14 @@ async def compose_limiteds_text(uid: int, lang: str) -> str:
 
         value = rap
         if roli_items:
-            arr = roli_items.get(str(aid))
-            if arr:
-                rv = arr[3]
+            idata = roli_items.get(str(aid))
+            if isinstance(idata, dict):
+                rv = idata.get("value") or 0
+                if rv > 0:
+                    value = rv
+            elif isinstance(idata, list) and len(idata) > 3:
+                # fallback for v2 cache
+                rv = idata[3]
                 if rv and rv > 0:
                     value = rv
 
@@ -2531,7 +2535,15 @@ async def cmd_obtained(message, command: CommandObject):
             f"<code>{dt_str}</code>"
         )
 
-
+@dp.message(Command("clearcache"))
+async def cmd_clearcache(message: Message):
+    if not message.from_user or message.from_user.id != OWNER_ID:
+        return
+    global ROLI_ITEMS_CACHE, ROLI_BUNDLE_MAP
+    ROLI_ITEMS_CACHE = None
+    ROLI_BUNDLE_MAP = None
+    await message.answer("Rolimons cache cleared.")
+        
 @dp.message(Command("template"))
 @track_command
 async def cmd_template(message, command: CommandObject):
@@ -3180,7 +3192,8 @@ async def inline_handler(query: InlineQuery):
             raise ValueError("not found")
 
         except Exception as e:
-            logging.error(f"inline item error: {e}")
+            if "not found" not in str(e):
+                logging.error(f"inline item error: {e}")
             results = [InlineQueryResultArticle(
                 id="item_err",
                 title="❌ Item not found",
