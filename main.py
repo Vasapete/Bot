@@ -393,6 +393,38 @@ class RobloxAPI:
             return None
         return data["data"][0]["imageUrl"]
 
+
+    async def get_asset_resellers(self, aid: int):
+    """Get current resell listings for limited items"""
+    try:
+        data = await self.req(
+            "GET",
+            f"https://economy.roblox.com/v1/assets/{aid}/resellers?limit=10"
+        )
+        return data.get("data", []) if data else []
+    except Exception:
+        return []
+
+    async def get_asset_favorites(self, aid: int):
+        try:
+            data = await self.req(
+                "GET",
+                f"https://catalog.roblox.com/v1/favorites/assets/{aid}/count"
+            )
+            return data if isinstance(data, int) else 0
+        except Exception:
+            return 0
+    
+    async def get_asset_thumbnail(self, aid: int) -> Optional[str]:
+        """High res asset thumbnail"""
+        data = await self.req(
+            "GET",
+            f"https://thumbnails.roblox.com/v1/assets?assetIds={aid}&size=420x420&format=Png&isCircular=false"
+        )
+        if not data or not data.get("data"):
+            return None
+        return data["data"][0].get("imageUrl")
+        
     async def get_asset_icon(self, aid: int) -> Optional[str]:
         url = (
             "https://thumbnails.roblox.com/v1/assets"
@@ -548,16 +580,28 @@ async def roli_get(url: str):
         return data
 
 
+ROLI_ITEMS_CACHE: Optional[Dict[str, list]] = None
+ROLI_BUNDLE_MAP: Optional[Dict[str, str]] = None  # asset_id -> bundle_id
+
 async def roli_get_items():
     global ROLI_ITEMS_CACHE
     if ROLI_ITEMS_CACHE is not None:
         return ROLI_ITEMS_CACHE
-    data = await roli_get("https://api.rolimons.com/items/v2/itemdetails")
-    if not data or "items" not in data:
-        ROLI_ITEMS_CACHE = {}
-    else:
-        ROLI_ITEMS_CACHE = data["items"]
+    # use v3
+    data = await roli_get("https://api.rolimons.com/items/v3/itemdetails")
+    ROLI_ITEMS_CACHE = data.get("items", {}) if data else {}
     return ROLI_ITEMS_CACHE
+
+async def roli_get_bundle_map():
+    global ROLI_BUNDLE_MAP
+    if ROLI_BUNDLE_MAP is not None:
+        return ROLI_BUNDLE_MAP
+    try:
+        data = await roli_get("https://api.rolimons.com/items/v1/faceassetbundlemap")
+        ROLI_BUNDLE_MAP = data if isinstance(data, dict) else {}
+    except Exception:
+        ROLI_BUNDLE_MAP = {}
+    return ROLI_BUNDLE_MAP
 
 
 async def compose_limiteds_text(uid: int, lang: str) -> str:
@@ -2715,47 +2759,72 @@ async def cb_roli_stats(cb: CallbackQuery):
 
 @dp.inline_query()
 async def inline_handler(query: InlineQuery):
-    text = query.query.strip()
+    user_id = query.from_user.id
+    text = (query.query or "").strip()
+
+    persist_user(user_id)
+
+    # channel check
+    if CHANNEL_CHECK_ENABLED and user_id != OWNER_ID:
+        try:
+            is_in = await is_member(bot, user_id, REQUIRED_CHANNEL)
+        except Exception:
+            is_in = True
+        if not is_in:
+            return await query.answer(
+                results=[InlineQueryResultArticle(
+                    id="not_member",
+                    title="⛔ Join channel first",
+                    description=f"Join {REQUIRED_CHANNEL} to use this bot",
+                    input_message_content=InputTextMessageContent(
+                        message_text=f"Join {REQUIRED_CHANNEL} to use @RBLXSbot"
+                    )
+                )],
+                cache_time=1
+            )
 
     if not text:
-        # show hints when nothing typed
-        results = [
-            InlineQueryResultArticle(
-                id="hint_user",
-                title="user <username>",
-                description="Look up a Roblox user",
-                input_message_content=InputTextMessageContent(
-                    message_text="/user "
-                )
-            ),
-            InlineQueryResultArticle(
-                id="hint_limiteds",
-                title="limiteds <username>",
-                description="View user limiteds with RAP/Value",
-                input_message_content=InputTextMessageContent(
-                    message_text="/limiteds "
-                )
-            ),
-            InlineQueryResultArticle(
-                id="hint_item",
-                title="item <assetid>",
-                description="Look up a Roblox item",
-                input_message_content=InputTextMessageContent(
-                    message_text="/assetid "
-                )
-            ),
-        ]
-        return await query.answer(results, cache_time=1)
+        return await query.answer(
+            results=[
+                InlineQueryResultArticle(
+                    id="hint1",
+                    title="👤 user <username>",
+                    description="Full Roblox user profile",
+                    input_message_content=InputTextMessageContent(
+                        message_text="Type: <code>@RBLXSbot user d45wn</code>",
+                        parse_mode="HTML"
+                    )
+                ),
+                InlineQueryResultArticle(
+                    id="hint2",
+                    title="💼 limiteds <username>",
+                    description="User's limiteds with total RAP & Value",
+                    input_message_content=InputTextMessageContent(
+                        message_text="Type: <code>@RBLXSbot limiteds d45wn</code>",
+                        parse_mode="HTML"
+                    )
+                ),
+                InlineQueryResultArticle(
+                    id="hint3",
+                    title="🎩 item <id / name / acronym>",
+                    description="Item info — works with ID, name, or acronym",
+                    input_message_content=InputTextMessageContent(
+                        message_text="Type: <code>@RBLXSbot item Chi</code>",
+                        parse_mode="HTML"
+                    )
+                ),
+            ],
+            cache_time=1
+        )
 
     parts = text.split(None, 1)
     cmd = parts[0].lower()
     arg = parts[1].strip() if len(parts) > 1 else ""
 
     if not arg:
-        await query.answer([], cache_time=1)
-        return
+        return await query.answer([], cache_time=1)
 
-    # user lookup
+    # ═══ USER ═══
     if cmd == "user":
         try:
             user = await roblox.get_user_details_by_username(arg)
@@ -2763,32 +2832,94 @@ async def inline_handler(query: InlineQuery):
                 raise ValueError("not found")
 
             uid = user["id"]
-            created = parse_iso8601(user["created"]).strftime("%Y-%m-%d")
-            banned = " BANNED" if user.get("isBanned") else ""
+            desc = (user.get("description") or "").strip()[:300]
+            created = parse_iso8601(user["created"])
+            created_str = created.strftime("%Y-%m-%d")
+
+            # parallel calls
+            friends, followers, followings, roli_data, presence = await asyncio.gather(
+                roblox.get_friends(uid),
+                roblox.get_followers(uid),
+                roblox.get_followings(uid),
+                roli_get(f"https://api.rolimons.com/players/v1/playerinfo/{uid}"),
+                roblox.get_presence([uid]),
+                return_exceptions=True
+            )
+
+            friends = friends if isinstance(friends, list) else []
+            followers = followers if isinstance(followers, list) else []
+            followings = followings if isinstance(followings, list) else []
+
+            premium = inv_public = rap = value = last_online_str = None
+            if isinstance(roli_data, dict):
+                premium = roli_data.get("premium")
+                inv_public = not roli_data.get("playerPrivacyEnabled", False)
+                rap = roli_data.get("rap")
+                value = roli_data.get("value")
+                lo_ts = roli_data.get("lastOnline")
+                if lo_ts:
+                    lo = dt.datetime.fromtimestamp(lo_ts, tz=dt.timezone.utc)
+                    last_online_str = lo.strftime("%Y-%m-%d %H:%M UTC")
+
+            # presence
+            pres_text = ""
+            if isinstance(presence, dict):
+                p = (presence.get("userPresences") or [{}])[0]
+                ptype = p.get("userPresenceType", 0)
+                pmap = {0: "⚫ Offline", 1: "🌐 Online", 2: "🎮 Playing", 3: "🔧 Studio"}
+                pres_text = pmap.get(ptype, "")
+
+            banned = " 🚫" if user.get("isBanned") else ""
+            verified = "✅" if user.get("hasVerifiedBadge") else ""
 
             msg = (
-                f"<b>{esc(user['name'])}</b>{banned}\n"
-                f"ID: <code>{uid}</code>\n"
-                f"Display: {esc(user.get('displayName', ''))}\n"
-                f"Created: {created}\n"
-                f"Verified: {user.get('hasVerifiedBadge', False)}\n\n"
-                f"<a href=\"https://www.roblox.com/users/{uid}/profile\">Roblox</a> "
+                f"👤 <b>{esc(user['name'])}</b> (<i>{esc(user.get('displayName',''))}</i>){banned} {verified}\n"
+                f"🆔 ID: <code>{uid}</code>\n"
+                f"📅 Created: <code>{created_str}</code>\n"
+            )
+            if premium is not None:
+                msg += f"⭐ Premium: <code>{premium}</code>\n"
+            if inv_public is not None:
+                msg += f"📦 Inventory: <code>{'Public' if inv_public else 'Private'}</code>\n"
+
+            msg += (
+                f"\n👥 Friends: <code>{len(friends)}</code> | "
+                f"⭐ Followers: <code>{len(followers)}</code> | "
+                f"➡️ Following: <code>{len(followings)}</code>\n"
+            )
+
+            if rap is not None:
+                msg += f"\n💰 RAP: <code>{rap:,}</code>\n💎 Value: <code>{value:,}</code>\n"
+            if pres_text:
+                msg += f"\n📡 {pres_text}\n"
+            if last_online_str:
+                msg += f"⏱ Last online: <code>{last_online_str}</code>\n"
+
+            msg += (
+                f"\n<a href=\"https://www.roblox.com/users/{uid}/profile\">Roblox</a> | "
                 f"<a href=\"https://www.rolimons.com/player/{uid}\">Rolimons</a>"
             )
+            if desc:
+                msg += f"\n\n📜 <i>{esc(desc)}</i>"
 
             results = [InlineQueryResultArticle(
                 id=f"user_{uid}",
-                title=f"{user['name']} (ID: {uid})",
-                description=f"Created: {created}{' | BANNED' if user.get('isBanned') else ''}",
+                title=f"👤 {user['name']}",
+                description=(
+                    f"ID: {uid} | "
+                    f"F: {len(friends)} | "
+                    + (f"RAP: {rap:,}" if rap else f"Created: {created_str}")
+                ),
+                thumbnail_url=await roblox.get_user_thumbnail(uid, "headshot"),
                 input_message_content=InputTextMessageContent(
-                    message_text=msg,
-                    parse_mode="HTML"
+                    message_text=msg, parse_mode="HTML"
                 )
             )]
-        except Exception:
+        except Exception as e:
+            logging.error(f"inline user error: {e}")
             results = [InlineQueryResultArticle(
                 id="user_err",
-                title="User not found",
+                title="❌ User not found",
                 description=arg,
                 input_message_content=InputTextMessageContent(
                     message_text=f"User <code>{esc(arg)}</code> not found.",
@@ -2797,7 +2928,7 @@ async def inline_handler(query: InlineQuery):
             )]
         return await query.answer(results, cache_time=30)
 
-    # limiteds lookup
+    # ═══ LIMITEDS ═══
     if cmd == "limiteds":
         try:
             base = await roblox.get_user_by_username(arg)
@@ -2805,33 +2936,53 @@ async def inline_handler(query: InlineQuery):
                 raise ValueError("not found")
             uid = base["id"]
             items = await roblox.get_collectibles(uid)
+            roli_items = await roli_get_items()
 
             if items is None:
-                msg = f"<b>{esc(base['name'])}</b>\nInventory is private."
+                msg = f"🔒 <b>{esc(base['name'])}</b> has a private inventory."
+                desc = "Private inventory"
             elif not items:
-                msg = f"<b>{esc(base['name'])}</b>\nNo limiteds."
+                msg = f"<b>{esc(base['name'])}</b> has no limiteds."
+                desc = "No limiteds"
             else:
-                total_rap = sum(i.get("recentAveragePrice") or 0 for i in items)
+                total_rap = 0
+                total_value = 0
+                for it in items:
+                    aid = str(it.get("assetId"))
+                    rap = it.get("recentAveragePrice") or 0
+                    total_rap += rap
+                    value = rap
+                    if roli_items:
+                        idata = roli_items.get(aid)
+                        if isinstance(idata, dict):
+                            v = idata.get("value") or 0
+                            if v > 0:
+                                value = v
+                    total_value += value
+
                 msg = (
-                    f"<b>Limiteds of {esc(base['name'])}</b>\n"
-                    f"Items: <code>{len(items)}</code>\n"
-                    f"Total RAP: <code>{total_rap:,}</code>\n\n"
+                    f"💼 <b>Limiteds of {esc(base['name'])}</b>\n"
+                    f"📦 Items: <code>{len(items)}</code>\n"
+                    f"💰 Total RAP: <code>{total_rap:,}</code>\n"
+                    f"💎 Total Value: <code>{total_value:,}</code>\n\n"
                     f"<a href=\"https://www.rolimons.com/player/{uid}\">View on Rolimons</a>"
                 )
+                desc = f"{len(items)} items | RAP: {total_rap:,} | Value: {total_value:,}"
 
             results = [InlineQueryResultArticle(
                 id=f"lim_{uid}",
-                title=f"Limiteds: {base['name']}",
-                description=f"{len(items) if items else 0} items" if items else "Private inventory",
+                title=f"💼 Limiteds: {base['name']}",
+                description=desc,
+                thumbnail_url=await roblox.get_user_thumbnail(uid, "headshot"),
                 input_message_content=InputTextMessageContent(
-                    message_text=msg,
-                    parse_mode="HTML"
+                    message_text=msg, parse_mode="HTML"
                 )
             )]
-        except Exception:
+        except Exception as e:
+            logging.error(f"inline limiteds error: {e}")
             results = [InlineQueryResultArticle(
                 id="lim_err",
-                title="User not found",
+                title="❌ User not found",
                 description=arg,
                 input_message_content=InputTextMessageContent(
                     message_text=f"User <code>{esc(arg)}</code> not found.",
@@ -2840,54 +2991,208 @@ async def inline_handler(query: InlineQuery):
             )]
         return await query.answer(results, cache_time=30)
 
-    # item lookup
-    if cmd == "item" and arg.isdigit():
+    # ═══ ITEM ═══
+    if cmd == "item":
         try:
-            aid = int(arg)
-            info = await roblox.get_asset_info(aid)
-            if not info:
-                raise ValueError("not found")
+            roli_items = await roli_get_items()
+            bundle_map = await roli_get_bundle_map()
 
-            name = info.get("Name") or info.get("name") or "?"
-            price = info.get("PriceInRobux") or "N/A"
-            creator = (info.get("Creator") or {})
-            creator_name = creator.get("Name") or "?"
-            is_limited = info.get("IsLimited") or False
-            is_limited_u = info.get("IsLimitedUnique") or False
+            found_id = None
+            found_data = None
 
-            msg = (
-                f"<b>{esc(str(name))}</b>\n"
-                f"ID: <code>{aid}</code>\n"
-                f"Creator: {esc(str(creator_name))}\n"
-                f"Price: <code>{price}</code>\n"
-                f"Limited: <code>{is_limited}</code>\n"
-                f"LimitedU: <code>{is_limited_u}</code>\n\n"
-                f"<a href=\"https://www.roblox.com/catalog/{aid}\">Open in catalog</a>"
-            )
+            if arg.isdigit():
+                found_id = arg
+                found_data = roli_items.get(arg) if roli_items else None
+            else:
+                arg_lower = arg.lower()
+                # exact acronym match first
+                for iid, idata in (roli_items or {}).items():
+                    if not isinstance(idata, dict):
+                        continue
+                    if str(idata.get("acronym") or "").lower() == arg_lower:
+                        found_id = iid
+                        found_data = idata
+                        break
+                # then exact name
+                if not found_id:
+                    for iid, idata in (roli_items or {}).items():
+                        if not isinstance(idata, dict):
+                            continue
+                        if str(idata.get("name") or "").lower() == arg_lower:
+                            found_id = iid
+                            found_data = idata
+                            break
+                # then partial name
+                if not found_id:
+                    for iid, idata in (roli_items or {}).items():
+                        if not isinstance(idata, dict):
+                            continue
+                        if arg_lower in str(idata.get("name") or "").lower():
+                            found_id = iid
+                            found_data = idata
+                            break
 
-            results = [InlineQueryResultArticle(
-                id=f"item_{aid}",
-                title=str(name),
-                description=f"ID: {aid} | Price: {price} | Limited: {is_limited}",
-                input_message_content=InputTextMessageContent(
-                    message_text=msg,
-                    parse_mode="HTML"
+            # ── LIMITED ITEM (in Rolimons db) ──
+            if found_id and found_data:
+                iname = found_data.get("name") or "?"
+                acronym = found_data.get("acronym") or ""
+                rap = found_data.get("rap") or 0
+                value = found_data.get("value") or 0
+                default_value = found_data.get("default_value") or 0
+                demand = found_data.get("demand")
+                trend = found_data.get("trend")
+                projected = found_data.get("projected")
+                rare = found_data.get("rare")
+
+                demand_map = {-1: "?", 0: "Terrible", 1: "Low", 2: "Normal", 3: "High", 4: "Amazing"}
+                trend_map = {-1: "?", 0: "Lowering", 1: "Unstable", 2: "Stable", 3: "Raising", 4: "Fluctuating"}
+
+                # get lowest resell price + favorites
+                aid_int = int(found_id)
+                resellers, favorites, asset_info = await asyncio.gather(
+                    roblox.get_asset_resellers(aid_int),
+                    roblox.get_asset_favorites(aid_int),
+                    roblox.get_asset_info(aid_int),
+                    return_exceptions=True
                 )
-            )]
-        except Exception:
+
+                lowest_price = None
+                if isinstance(resellers, list) and resellers:
+                    prices = [r.get("price") for r in resellers if r.get("price")]
+                    if prices:
+                        lowest_price = min(prices)
+
+                bundle_id = bundle_map.get(str(found_id)) if bundle_map else None
+                if bundle_id:
+                    item_url = f"https://www.rolimons.com/bundle/{bundle_id}"
+                    roblox_url = f"https://www.roblox.com/bundles/{bundle_id}"
+                else:
+                    item_url = f"https://www.rolimons.com/item/{found_id}"
+                    roblox_url = f"https://www.roblox.com/catalog/{found_id}"
+
+                title_line = f"🎩 <b>{esc(str(iname))}</b>"
+                if acronym:
+                    title_line += f" ({esc(acronym)})"
+
+                msg = title_line + "\n"
+                msg += f"🆔 Asset ID: <code>{found_id}</code>\n"
+                if bundle_id:
+                    msg += f"📦 Bundle ID: <code>{bundle_id}</code>\n"
+                msg += "\n"
+                if lowest_price is not None:
+                    msg += f"💵 Lowest Price: <code>{lowest_price:,}</code>\n"
+                msg += f"💰 RAP: <code>{rap:,}</code>\n"
+                msg += f"💎 Value: <code>{value:,}</code>\n"
+                if default_value:
+                    msg += f"🏷 Default Value: <code>{default_value:,}</code>\n"
+                if demand is not None and demand != -1:
+                    msg += f"📊 Demand: <code>{demand_map.get(demand,'?')}</code>\n"
+                if trend is not None and trend != -1:
+                    msg += f"📈 Trend: <code>{trend_map.get(trend,'?')}</code>\n"
+                if projected:
+                    msg += "⚠️ Projected: <code>Yes</code>\n"
+                if rare:
+                    msg += "💠 Rare: <code>Yes</code>\n"
+                if isinstance(favorites, int) and favorites:
+                    msg += f"❤️ Favorites: <code>{favorites:,}</code>\n"
+
+                msg += f"\n<a href=\"{item_url}\">Rolimons</a> | <a href=\"{roblox_url}\">Roblox</a>"
+
+                desc_line = f"RAP: {rap:,} | Value: {value:,}"
+                if lowest_price:
+                    desc_line += f" | Low: {lowest_price:,}"
+
+                results = [InlineQueryResultArticle(
+                    id=f"item_{found_id}",
+                    title=f"🎩 {iname}" + (f" ({acronym})" if acronym else ""),
+                    description=desc_line,
+                    thumbnail_url=await roblox.get_asset_thumbnail(aid_int),
+                    input_message_content=InputTextMessageContent(
+                        message_text=msg, parse_mode="HTML"
+                    )
+                )]
+                return await query.answer(results, cache_time=60)
+
+            # ── UGC / regular asset (not in Rolimons) ──
+            if arg.isdigit():
+                aid = int(arg)
+                info, favorites = await asyncio.gather(
+                    roblox.get_asset_info(aid),
+                    roblox.get_asset_favorites(aid),
+                    return_exceptions=True
+                )
+
+                if not isinstance(info, dict):
+                    raise ValueError("not found")
+
+                name = info.get("Name") or info.get("name") or "?"
+                description = (info.get("Description") or "")[:200]
+                price = info.get("PriceInRobux")
+                creator = info.get("Creator") or {}
+                creator_name = creator.get("Name") or "?"
+                creator_id = creator.get("Id") or "?"
+                sales = info.get("Sales")
+                is_for_sale = info.get("IsForSale", False)
+                is_public_domain = info.get("IsPublicDomain", False)
+                remaining = info.get("Remaining")  # for limited stock UGC
+
+                msg = f"🎨 <b>{esc(str(name))}</b>\n"
+                msg += f"🆔 ID: <code>{aid}</code>\n"
+                msg += f"👤 Creator: <code>{esc(str(creator_name))}</code>"
+                if creator_id != "?":
+                    msg += f" (<code>{creator_id}</code>)"
+                msg += "\n\n"
+
+                if price is not None and is_for_sale:
+                    msg += f"💵 Price: <code>{price:,} R$</code>\n"
+                elif is_public_domain:
+                    msg += "🆓 Free\n"
+                else:
+                    msg += "❌ Off-sale\n"
+
+                if remaining is not None:
+                    msg += f"📦 Stock left: <code>{remaining:,}</code>\n"
+                if sales is not None:
+                    msg += f"📈 Sales: <code>{sales:,}</code>\n"
+                if isinstance(favorites, int) and favorites:
+                    msg += f"❤️ Favorites: <code>{favorites:,}</code>\n"
+
+                msg += f"\n<a href=\"https://www.roblox.com/catalog/{aid}\">Open in Catalog</a>"
+
+                if description:
+                    msg += f"\n\n📜 <i>{esc(description)}</i>"
+
+                stock_text = f" | Stock: {remaining}" if remaining is not None else ""
+                price_text = f"{price:,} R$" if price else ("Free" if is_public_domain else "Off-sale")
+
+                results = [InlineQueryResultArticle(
+                    id=f"ugc_{aid}",
+                    title=f"🎨 {name}",
+                    description=f"{price_text}{stock_text}",
+                    thumbnail_url=await roblox.get_asset_thumbnail(aid),
+                    input_message_content=InputTextMessageContent(
+                        message_text=msg, parse_mode="HTML"
+                    )
+                )]
+                return await query.answer(results, cache_time=60)
+
+            raise ValueError("not found")
+
+        except Exception as e:
+            logging.error(f"inline item error: {e}")
             results = [InlineQueryResultArticle(
                 id="item_err",
-                title="Item not found",
-                description=f"Asset ID: {arg}",
+                title="❌ Item not found",
+                description=arg,
                 input_message_content=InputTextMessageContent(
-                    message_text=f"Item <code>{esc(arg)}</code> not found.",
+                    message_text=f"Item <code>{esc(arg)}</code> not found.\n"
+                                 f"Try searching by ID, name, or acronym.",
                     parse_mode="HTML"
                 )
             )]
-        return await query.answer(results, cache_time=30)
+        return await query.answer(results, cache_time=10)
 
-    # nothing matched
-    await query.answer([], cache_time=1)
+    return await query.answer([], cache_time=1)
 
 
 @dp.callback_query(F.data.startswith("set_lang:"))
@@ -2929,10 +3234,10 @@ async def on_bot_chat_member_update(event):
     
 async def main():
     await dp.start_polling(
-    bot,
-    allowed_updates=["message", "callback_query", "my_chat_member", "inline_query"],
-    polling_timeout=30,
-    handle_as_tasks=True,)
+        bot,
+        allowed_updates=["message", "callback_query", "my_chat_member", "inline_query"],
+        polling_timeout=30,
+        handle_as_tasks=True,)
     try:
         await bot.delete_webhook(drop_pending_updates=True)
         logging.info("Webhook deleted, starting polling...")
