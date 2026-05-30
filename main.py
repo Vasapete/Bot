@@ -589,7 +589,7 @@ async def roli_get_items():
     if ROLI_ITEMS_CACHE is not None:
         return ROLI_ITEMS_CACHE
     data = await roli_get("https://api.rolimons.com/items/v3/itemdetails")
-    ROLI_ITEMS_CACHE = data.get("items", {}) if data else {}
+    ROLI_ITEMS_CACHE = data.get("assets", {}) if data else {}
     return ROLI_ITEMS_CACHE
 
 async def roli_get_bundle_map():
@@ -644,15 +644,13 @@ async def compose_limiteds_text(uid: int, lang: str) -> str:
         value = rap
         if roli_items:
             idata = roli_items.get(str(aid))
-            if isinstance(idata, dict):
-                rv = idata.get("value") or 0
-                if rv > 0:
-                    value = rv
-            elif isinstance(idata, list) and len(idata) > 3:
-                # fallback for v2 cache
+            if isinstance(idata, list) and len(idata) > 3:
                 rv = idata[3]
-                if rv and rv > 0:
-                    value = rv
+                if rv and rv > 0: value = rv
+                else: value = idata[2] # Fallback to RAP
+            elif isinstance(idata, dict):
+                rv = idata.get("value") or 0
+                if rv > 0: value = rv
 
         total_value += value
 
@@ -872,7 +870,7 @@ async def cmd_user(message, command: CommandObject):
     created = parse_iso8601(user["created"])
     created_str = created.strftime("%Y-%m-%d %H:%M UTC")
 
-    friends, followers, followings, roli_data, thumb_url = await asyncio.gather(
+    friends, followers, followings, roli_data, thumb_url, presence = await asyncio.gather(
         roblox.get_friends(uid),
         roblox.get_followers(uid),
         roblox.get_followings(uid),
@@ -885,6 +883,16 @@ async def cmd_user(message, command: CommandObject):
     followers = followers if isinstance(followers, list) else []
     followings = followings if isinstance(followings, list) else []
     thumb_url = thumb_url if isinstance(thumb_url, str) else None
+
+    # Presence processing
+    pres_text = "⚫ Offline"
+    if isinstance(presence, dict):
+        try:
+            p = (presence.get("userPresences") or [{}])[0]
+            ptype = p.get("userPresenceType", 0)
+            pmap = {0: "⚫ Offline", 1: "🌐 Online", 2: "🎮 Playing", 3: "🔧 Studio"}
+            pres_text = pmap.get(ptype, "⚫ Offline")
+        except Exception: pass
 
     premium = inv_public = rap = value = last_online_str = None
     roli_badges_text = ""
@@ -910,7 +918,8 @@ async def cmd_user(message, command: CommandObject):
             f"🆔 ID: <code>{uid}</code>\n"
             f"📅 Создан: <code>{created_str}</code>\n"
             f"✅ Verified: <code>{user.get('hasVerifiedBadge', False)}</code>\n"
-            f"⛔️ Забанен: <code>{user.get('isBanned', False)}</code>\n"
+            f"⛔️ Забанен: <code>{user.get('isBanned', False)}</code>\n"\
+            f"📡 Статус: <b>{pres_text}</b>\n"
         )
         if premium is not None:
             text += f"⭐ Premium: <code>{premium}</code>\n"
@@ -939,7 +948,8 @@ async def cmd_user(message, command: CommandObject):
             f"🆔 ID: <code>{uid}</code>\n"
             f"📅 Created: <code>{created_str}</code>\n"
             f"✅ Verified: <code>{user.get('hasVerifiedBadge', False)}</code>\n"
-            f"⛔️ Banned: <code>{user.get('isBanned', False)}</code>\n"
+            f"⛔️ Banned: <code>{user.get('isBanned', False)}</code>\n"\
+            f"📡 Presence: <b>{pres_text}</b>\n"
         )
         if premium is not None:
             text += f"⭐ Premium: <code>{premium}</code>\n"
@@ -2921,7 +2931,7 @@ async def inline_handler(query: InlineQuery):
                 description=(
                     f"ID: {uid} | "
                     f"F: {len(friends)} | "
-                    + (f"RAP: {rap:,}" if rap else f"Created: {created_str}")
+                    + (f"RAP: {rap:,}" if rap else f"Created: <code>{created_str}</code>")
                 ),
                 thumbnail_url=await roblox.get_user_thumbnail(uid, "headshot"),
                 input_message_content=InputTextMessageContent(
@@ -2967,10 +2977,13 @@ async def inline_handler(query: InlineQuery):
                     value = rap
                     if roli_items:
                         idata = roli_items.get(aid)
-                        if isinstance(idata, dict):
+                        if isinstance(idata, list) and len(idata) > 3:
+                            v = idata[3]
+                            if v == -1: v = idata[2]
+                            if v > 0: value = v
+                        elif isinstance(idata, dict):
                             v = idata.get("value") or 0
-                            if v > 0:
-                                value = v
+                            if v > 0: value = v
                     total_value += value
 
                 msg = (
@@ -3027,7 +3040,7 @@ async def inline_handler(query: InlineQuery):
                 for iid, idata in (roli_items or {}).items():
                     if not isinstance(idata, dict):
                         continue
-                    if str(idata.get("acronym") or "").lower() == arg_lower:
+                    if str(idata[1] if isinstance(idata, list) else idata.get("acronym", "")).lower() == arg_lower:
                         found_id = iid
                         found_data = idata
                         break
@@ -3036,7 +3049,7 @@ async def inline_handler(query: InlineQuery):
                     for iid, idata in (roli_items or {}).items():
                         if not isinstance(idata, dict):
                             continue
-                        if str(idata.get("name") or "").lower() == arg_lower:
+                        if str(idata[0] if isinstance(idata, list) else idata.get("name", "")).lower() == arg_lower:
                             found_id = iid
                             found_data = idata
                             break
@@ -3045,17 +3058,17 @@ async def inline_handler(query: InlineQuery):
                     for iid, idata in (roli_items or {}).items():
                         if not isinstance(idata, dict):
                             continue
-                        if arg_lower in str(idata.get("name") or "").lower():
+                        if arg_lower in str(idata[0] if isinstance(idata, list) else idata.get("name", "")).lower():
                             found_id = iid
                             found_data = idata
                             break
 
             # ── LIMITED ITEM (in Rolimons db) ──
             if found_id and found_data:
-                iname = found_data.get("name") or "?"
-                acronym = found_data.get("acronym") or ""
-                rap = found_data.get("rap") or 0
-                value = found_data.get("value") or 0
+                iname = (found_data[0] if isinstance(found_data, list) else found_data.get("name")) or "?"
+                acronym = (found_data[1] if isinstance(found_data, list) else found_data.get("acronym")) or ""
+                rap = found_data[2] if isinstance(found_data, list) else found_data.get("rap", 0)
+                value = (found_data[3] if found_data[3] != -1 else found_data[2]) if isinstance(found_data, list) else (found_data.get("value") or found_data.get("rap") or 0)
                 default_value = found_data.get("default_value") or 0
                 demand = found_data.get("demand")
                 trend = found_data.get("trend")
