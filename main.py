@@ -470,12 +470,6 @@ class RobloxAPI:
         data = await self.req("GET", url)
         return data.get("data", []) if data else []
 
-    async def get_social_links(self, uid: int):
-        return await self.req("GET", f"https://users.roblox.com/v1/users/{uid}/social-links")
-
-    async def get_outfits(self, uid: int):
-        return await self.req("GET", f"https://avatar.roblox.com/v1/users/{uid}/outfits?itemsPerPage=50")
-
     async def get_user_groups(self, uid: int):
         data = await self.req(
             "GET",
@@ -726,73 +720,189 @@ async def cmd_start(message, command: CommandObject):
     lang = get_lang(message)
     if lang == "ru":
         text = (
-            f"👤 <b>{esc(user['name'])}</b> (@{esc(user['name'])})\n"
-            f"<b>{len(friends)}</b> Friends | <b>{len(followers)}</b> Followers | <b>{len(followings)}</b> Following\n\n"
-            f"🆔 <b>ID</b>: <code>{uid}</code>\n"
-            f"✅ <b>Verified</b>: <code>{user.get('hasVerifiedBadge', False)}</code>\n"
-            f"📦 <b>Inventory</b>: <a href='https://www.roblox.com/users/{uid}/inventory'>{'Публичный' if inv_public else 'Скрыт'}</a>\n"
+            "🎮 <b>RS • RBLXScan</b>\n"
+            "Быстрый просмотр данных Roblox: профили, лимитки, Rolimons, группы и другое.\n\n"
+            "⚙️ Основные команды:\n"
+            "/user <code>имя</code>\n→ Профиль пользователя\n\n"
+            "/limiteds <code>имя</code>\n→ Все лимитки с RAP/Value\n\n"
+            "/rolimons <code>имя</code>\n→ Статистика Rolimons\n\n"
+            "Полный список: /help\n"
+            "Язык: /language"
         )
-        if rap is not None:
-            text += f"💰 <b>RAP</b>: <code>{rap:,}</code>\n💎 <b>Value</b>: <code>{value:,}</code>\n"
-        text += f"📅 <b>Создан</b>: <code>{created_str}</code>\n"
-        text += f"📡 <b>Статус</b>: {pres_text}\n"
-        if desc: text += f"\n📜 <i>{desc[:200]}...</i>"}</code> | "
-            f"➡️ Подписки: <code>{len(followings)}</code>\n"
+        kb = InlineKeyboardMarkup(
+            inline_keyboard=[
+                [InlineKeyboardButton(text="🧑‍🔧 Команды", callback_data="help_open")],
+                [
+                    InlineKeyboardButton(text="🇬🇧 English", callback_data="set_lang:en"),
+                    InlineKeyboardButton(text="🇷🇺 Русский", callback_data="set_lang:ru"),
+                ],
+            ]
         )
-        if rap is not None and value is not None:
-            text += f"💰 RAP: <code>{rap:,}</code>\n💎 Value: <code>{value:,}</code>\n"
-        if last_online_str:
-            text += f"⏱️ Последний онлайн: <code>{last_online_str}</code>\n"
-        text += (
-            f"\n<a href=\"https://www.roblox.com/users/{uid}/profile\">Профиль Roblox</a>\n"
-            f"<a href=\"https://www.rolimons.com/player/{uid}\">Профиль Rolimons</a>"
-        )
-        if roli_badges_text:
-            text += f"\n🏅 Значки: {esc(roli_badges_text)}"
-        if desc:
-            text += f"\n\n📜 Описание:\n{desc}"
     else:
         text = (
-            f"👤 <b>{esc(user['name'])}</b> (<i>{esc(user['displayName'])}</i>)\n"
-            f"🆔 ID: <code>{uid}</code>\n"
-            f"📅 Created: <code>{created_str}</code>\n"
-            f"✅ Verified: <code>{user.get('hasVerifiedBadge', False)}</code>\n"
-            f"⛔️ Banned: <code>{user.get('isBanned', False)}</code>\n"\
-            f"📡 Presence: <b>{pres_text}</b>\n"
+            "🎮 <b>RS • RBLXScan</b>\n"
+            "Fast Roblox lookup: profiles, limiteds, Rolimons, groups and more.\n\n"
+            "⚙️ Core commands:\n"
+            "/user <code>username</code>\n→ View user profile\n\n"
+            "/limiteds <code>username</code>\n→ All limiteds with RAP/Value\n\n"
+            "/rolimons <code>username</code>\n→ Rolimons stats\n\n"
+            "Full list: /help\n"
+            "Language: /language"
         )
-        if premium is not None:
-            text += f"⭐ Premium: <code>{premium}</code>\n"
-        if inv_public is not None:
-            text += f"📦 Inventory: <code>{'Public' if inv_public else 'Private'}</code>\n"
-        text += (
-            f"👥 Friends: <code>{len(friends)}</code> | "
-            f"⭐ Followers: <code>{len(followers)}</code> | "
-            f"➡️ Following: <code>{len(followings)}</code>\n"
+        kb = InlineKeyboardMarkup(
+            inline_keyboard=[
+                [InlineKeyboardButton(text="🧑‍🔧 Help & Commands", callback_data="help_open")],
+                [
+                    InlineKeyboardButton(text="🇬🇧 English", callback_data="set_lang:en"),
+                    InlineKeyboardButton(text="🇷🇺 Русский", callback_data="set_lang:ru"),
+                ],
+            ]
         )
-        if rap is not None and value is not None:
-            text += f"💰 RAP: <code>{rap:,}</code>\n💎 Value: <code>{value:,}</code>\n"
-        if last_online_str:
-            text += f"⏱️ Last online: <code>{last_online_str}</code>\n"
-        text += (
-            f"\n<a href=\"https://www.roblox.com/users/{uid}/profile\">Roblox profile</a>\n"
-            f"<a href=\"https://www.rolimons.com/player/{uid}\">Rolimons profile</a>"
-        )
-        if roli_badges_text:
-            text += f"\n🏅 Badges: {esc(roli_badges_text)}"
-        if desc:
-            text += f"\n\n📜 Description:\n{desc}"
+    await message.answer(text, reply_markup=kb)
 
-    kb = user_profile_keyboard(uid)
-    img = await roblox.download_image(thumb_url) if thumb_url else None
-    photo = BufferedInputFile(img, filename="profile.png") if img else FSInputFile("RS.png")
 
+@dp.message(Command("help"))
+@track_command
+async def cmd_help(message, command: CommandObject):
+    lang = get_lang(message)
+    if lang == "ru":
+        text = (
+            "🧑‍🔧 <b>Полный список команд</b>\n\n"
+            "/user &lt;Имя&gt;\n→ Показать детали профиля по имени\n\n"
+            "/id &lt;UserID&gt;\n→ Показать детали профиля по ID\n\n"
+            "/username &lt;Имя&gt;\n→ Проверить, занят ли юзернейм\n\n"
+            "/displayname &lt;Имя&gt;\n→ Найти пользователей по display name\n\n"
+            "/copyid &lt;Имя&gt;\n→ Быстро получить ID пользователя\n\n"
+            "/idtousername &lt;ID1 ID2 ...&gt;\n→ Конвертировать ID → имена\n\n"
+            "/banned &lt;ID1 ID2 ...&gt;\n→ Проверить, забанены ли пользователи\n\n"
+            "/accountage &lt;Имя&gt;\n→ Возраст аккаунта в днях и годах\n\n"
+            "/lastonline &lt;Имя&gt;\n→ Последний онлайн и локация\n\n"
+            "/avatar &lt;Имя&gt;\n→ Картинка аватара\n\n"
+            "/headshot &lt;Имя&gt;\n→ Headshot аватара\n\n"
+            "/bust &lt;Имя&gt;\n→ Поясное изображение (bust)\n\n"
+            "/assetid &lt;AssetID&gt;\n→ Инфо о предмете\n\n"
+            "/asseticon &lt;AssetID&gt;\n→ Иконка предмета\n\n"
+            "/groupid &lt;GroupID&gt;\n→ Инфо о группе по ID\n\n"
+            "/group &lt;Имя&gt;\n→ Поиск группы по названию\n\n"
+            "/groupicon &lt;GroupID&gt;\n→ Ссылка на группу\n\n"
+            "/groups &lt;Имя&gt;\n→ Группы, в которых состоит пользователь\n\n"
+            "/friends &lt;Имя&gt;\n→ Список друзей\n\n"
+            "/followers &lt;Имя&gt;\n→ Список подписчиков\n\n"
+            "/followings &lt;Имя&gt;\n→ На кого подписан пользователь\n\n"
+            "/limiteds &lt;Имя&gt;\n→ Все лимитки с RAP/Value\n\n"
+            "/rolimons &lt;Имя&gt;\n→ Статистика с Rolimons\n\n"
+            "/devex &lt;Robux&gt;\n→ Примерная сумма в USD\n\n"
+            "/devexcad &lt;Robux&gt;\n→ Примерная сумма в CAD\n\n"
+            "/language\n→ Сменить язык бота (en/ru)\n\n"
+            "/names &lt;Имя&gt;\n→ История юзернеймов\n\n"
+            "/verified &lt;Имя&gt;\n→ Статус верификации\n\n"
+            "/owned &lt;Имя&gt; &lt;AssetID&gt;\n→ Проверить, владеет ли пользователь предметом\n\n"
+            "/obtained &lt;Имя&gt; &lt;BadgeID&gt;\n→ Когда пользователь получил бейдж\n\n"
+            "/template &lt;AssetID&gt;\n→ Ссылка на исходный asset/текстуру\n\n"
+            "/offsales &lt;Имя&gt;\n→ Информация о оффсейлах (ограничено)\n\n"
+            "/links\n→ Полезные ссылки (скоро)"
+        )
+    else:
+        text = (
+            "🧑‍🔧 <b>Full command list</b>\n\n"
+            "/user &lt;Username&gt;\n→ Display details about a Roblox user by username\n\n"
+            "/id &lt;UserID&gt;\n→ Display details about a Roblox user by ID\n\n"
+            "/username &lt;Username&gt;\n→ Check if a username is available/taken\n\n"
+            "/displayname &lt;Name&gt;\n→ Find users by display name\n\n"
+            "/copyid &lt;Username&gt;\n→ Quickly get a user's ID\n\n"
+            "/idtousername &lt;ID1 ID2 ...&gt;\n→ Convert IDs → usernames\n\n"
+            "/banned &lt;ID1 ID2 ...&gt;\n→ Check if users are banned\n\n"
+            "/accountage &lt;Username&gt;\n→ Show account age in days/years\n\n"
+            "/lastonline &lt;Username&gt;\n→ Show last online and location\n\n"
+            "/avatar &lt;Username&gt;\n→ Send avatar render\n\n"
+            "/headshot &lt;Username&gt;\n→ Send avatar headshot\n\n"
+            "/bust &lt;Username&gt;\n→ Send avatar bust\n\n"
+            "/assetid &lt;AssetID&gt;\n→ Show item info\n\n"
+            "/asseticon &lt;AssetID&gt;\n→ Show item icon\n\n"
+            "/groupid &lt;GroupID&gt;\n→ Group info by ID\n\n"
+            "/group &lt;Name&gt;\n→ Search group by name\n\n"
+            "/groupicon &lt;GroupID&gt;\n→ Link to group\n\n"
+            "/groups &lt;Username&gt;\n→ Show user groups\n\n"
+            "/friends &lt;Username&gt;\n→ Show friends list\n\n"
+            "/followers &lt;Username&gt;\n→ Show followers\n\n"
+            "/followings &lt;Username&gt;\n→ Show followings\n\n"
+            "/limiteds &lt;Username&gt;\n→ Scan all RAP/Value items\n\n"
+            "/rolimons &lt;Username&gt;\n→ Rolimons RAP/Value and more\n\n"
+            "/devex &lt;Robux&gt;\n→ Approximate cash value in USD\n\n"
+            "/devexcad &lt;Robux&gt;\n→ Approximate cash value in CAD\n\n"
+            "/language\n→ Change bot language (en/ru)\n\n"
+            "/names &lt;Username&gt;\n→ Show username history\n\n"
+            "/verified &lt;Username&gt;\n→ Show verification status\n\n"
+            "/owned &lt;Username&gt; &lt;AssetID&gt;\n→ Check if user owns item\n\n"
+            "/obtained &lt;Username&gt; &lt;BadgeID&gt;\n→ When user got a player badge\n\n"
+            "/template &lt;AssetID&gt;\n→ Mesh/texture/template URL\n\n"
+            "/offsales &lt;Username&gt;\n→ Offsale info (limited by APIs)\n\n"
+            "/links\n→ Useful links (soon)"
+        )
+    await message.answer(text)
+
+
+@dp.message(Command("user"))
+@track_command
+async def cmd_user(message, command: CommandObject):
+    lang = get_lang(message)
+    name = (command.args or "").strip()
+    if not name:
+        if lang == "ru": return await message.answer("/user <Имя>")
+        return await message.answer("/user <Username>")
     try:
-        await message.answer_photo(photo, caption=text, reply_markup=kb)
-    except Exception:
-        await message.answer(text, reply_markup=kb)
+        user = await roblox.get_user_details_by_username(name)
+    except Exception as e:
+        return await message.answer(f"Error: <code>{esc(str(e))}</code>")
+    if not user: return await message.answer("User not found.")
+    uid = user["id"]
+    desc = esc((user.get("description") or "").strip()[:400])
+    created = parse_iso8601(user["created"])
+    created_str = created.strftime("%Y-%m-%d")
 
+    friends, followers, followings, roli_data, thumb_url, presence = await asyncio.gather(
+        roblox.get_friends(uid), roblox.get_followers(uid), roblox.get_followings(uid),
+        roli_get(f"https://api.rolimons.com/players/v1/playerinfo/{uid}"),
+        roblox.get_user_thumbnail(uid, "bust"), roblox.get_presence([uid]),
+        return_exceptions=True
+    )
+    friends = [f for f in friends if isinstance(f, dict)] if isinstance(friends, list) else []
+    followers = [f for f in followers if isinstance(f, dict)] if isinstance(followers, list) else []
+    followings = [f for f in followings if isinstance(f, dict)] if isinstance(followings, list) else []
+    thumb_url = thumb_url if isinstance(thumb_url, str) else None
 
+    pres_text = "⚫ Offline"
+    if isinstance(presence, dict):
+        try:
+            p = (presence.get("userPresences") or [{}])[0]
+            ptype = p.get("userPresenceType", 0)
+            pmap = {0: "⚫ Offline", 1: "🌐 Online", 2: "🎮 Playing", 3: "🔧 Studio"}
+            pres_text = pmap.get(ptype, "⚫ Offline")
+        except: pass
 
+    rap = value = premium = inv_public = "N/A"
+    if isinstance(roli_data, dict):
+        rap = roli_data.get("rap", 0)
+        value = roli_data.get("value", 0)
+        if value == -1 or not value: value = rap
+        premium = "Yes" if roli_data.get("premium") else "No"
+        inv_public = not roli_data.get("playerPrivacyEnabled", False)
+
+    text = (
+        f"👤 <b>{esc(user['name'])}</b> (@{esc(user['name'])})\n"
+        f"<b>{len(friends)}</b> Friends | <b>{len(followers)}</b> Followers | <b>{len(followings)}</b> Following\n\n"
+        f"🆔 <b>ID</b>: <code>{uid}</code>\n"
+        f"✅ <b>Verified</b>: <code>{user.get('hasVerifiedBadge', False)}</code>\n"
+        f"📦 <b>Inventory</b>: <a href='https://www.roblox.com/users/{uid}/inventory'>{'Public' if inv_public != False else 'Private'}</a>\n"
+        f"💰 <b>RAP</b>: <code>{rap:, if isinstance(rap, int) else rap}</code>\n"
+        f"💎 <b>Value</b>: <code>{value:, if isinstance(value, int) else value}</code>\n"
+        f"📅 <b>Created</b>: <code>{created_str}</code>\n"
+        f"📡 <b>Status</b>: {pres_text}\n"
+    )
+    if desc: text += f"\n📜 <i>{desc}</i>"
+    kb = user_profile_keyboard(uid)
+    if thumb_url: await message.answer_photo(thumb_url, caption=text, reply_markup=kb)
+    else: await message.answer(text, reply_markup=kb)
 @dp.message(Command("id"))
 @track_command
 async def cmd_id(message, command: CommandObject):
@@ -1806,29 +1916,11 @@ async def cmd_group(message, command: CommandObject):
 @dp.message(Command("groupicon"))
 @track_command
 async def cmd_groupicon(message, command: CommandObject):
-    lang = get_lang(message)
-    raw = (command.args or "").strip()
-    if not raw.isdigit():
-        if lang == "ru":
-            return await message.answer(
-                "/groupicon &lt;GroupID&gt;\n→ Открыть страницу группы\nПример: <code>/groupicon 35700808</code>"
-            )
-        return await message.answer(
-            "/groupicon &lt;GroupID&gt;\n→ Open group page\nExample: <code>/groupicon 35700808</code>"
-        )
-    gid = int(raw)
-    if lang == "ru":
-        await message.answer(
-            f"Иконка группы через API недоступна.\n\n"
-            f"Группа: https://www.roblox.com/groups/{gid}"
-        )
-    else:
-        await message.answer(
-            f"Roblox group icons are not exposed via this API.\n\n"
-            f"Group: https://www.roblox.com/groups/{gid}"
-        )
-
-
+    gid = (command.args or "").strip()
+    if not gid.isdigit(): return await message.answer("/groupicon <ID>")
+    icon = await roblox.get_group_icon(int(gid))
+    if icon: return await message.answer_photo(icon, caption=f"👥 Group {gid}")
+    await message.answer(f"Group: https://www.roblox.com/groups/{gid}")
 @dp.message(Command("groups"))
 @track_command
 async def cmd_groups(message, command: CommandObject):
@@ -2740,7 +2832,7 @@ async def inline_handler(query: InlineQuery):
                 description=(
                     f"ID: {uid} | "
                     f"F: {len(friends)} | "
-                    + (f"RAP: {rap:,}" if rap else f"Created: <code>{created_str}</code>")
+                    + (f"RAP: {rap:,}" if rap else f"Created: {created_str}")
                 ),
                 thumbnail_url=await roblox.get_user_thumbnail(uid, "headshot"),
                 input_message_content=InputTextMessageContent(
@@ -2786,13 +2878,10 @@ async def inline_handler(query: InlineQuery):
                     value = rap
                     if roli_items:
                         idata = roli_items.get(aid)
-                        if isinstance(idata, list) and len(idata) > 3:
-                            v = idata[3]
-                            if v == -1: v = idata[2]
-                            if v > 0: value = v
-                        elif isinstance(idata, dict):
+                        if isinstance(idata, dict):
                             v = idata.get("value") or 0
-                            if v > 0: value = v
+                            if v > 0:
+                                value = v
                     total_value += value
 
                 msg = (
@@ -2835,11 +2924,6 @@ async def inline_handler(query: InlineQuery):
             found_id = None
             found_data = None
 
-            # Acronym search
-            items_data = await roli_get_items()
-            for iid, details in (items_data or {}).items():
-                if isinstance(details, dict) and str(details.get("acronym") or "").lower() == arg.lower():
-                    arg = iid; break
             if arg.isdigit():
                 found_id = arg
                 found_data = roli_items.get(arg) if roli_items else None
@@ -2875,7 +2959,7 @@ async def inline_handler(query: InlineQuery):
             # ── LIMITED ITEM (in Rolimons db) ──
             if found_id and found_data:
                 iname = (found_data[0] if isinstance(found_data, list) else found_data.get("name")) or "?"
-                acronym = (found_data[1] if isinstance(found_data, list) else found_data.get("acronym")) or ""
+                acronym = found_data.get("acronym") or ""
                 rap = found_data[2] if isinstance(found_data, list) else found_data.get("rap", 0)
                 value = (found_data[3] if found_data[3] != -1 else found_data[2]) if isinstance(found_data, list) else (found_data.get("value") or found_data.get("rap") or 0)
                 default_value = found_data.get("default_value") or 0
@@ -3035,7 +3119,6 @@ async def inline_handler(query: InlineQuery):
 
     return await query.answer([], cache_time=1)
 
-
 @dp.callback_query(F.data.startswith("set_lang:"))
 async def cb_set_lang(cb: CallbackQuery):
     code = cb.data.split(":", 1)[1]
@@ -3073,6 +3156,36 @@ async def on_bot_chat_member_update(event):
     except Exception as e:
         logging.error(f"Error in chat member update: {e}")
     
+
+@dp.message(Command("item"))
+@track_command
+async def cmd_item(message, command: CommandObject):
+    lang = get_lang(message)
+    arg = (command.args or "").strip()
+    if not arg: return await message.answer("/item <name/acronym/id>")
+    roli_items = await roli_get_items()
+    found_id = None; found_data = None
+    if arg.isdigit():
+        found_id = arg; found_data = roli_items.get(arg)
+    else:
+        for iid, idata in roli_items.items():
+            if isinstance(idata, list):
+                if str(idata[1]).lower() == arg.lower() or str(idata[0]).lower() == arg.lower():
+                    found_id = iid; found_data = idata; break
+    if not found_id: return await message.answer("❌ Item not found.")
+    iname, acronym, rap, val = found_data[0], found_data[1], found_data[2], found_data[3]
+    val = val if val != -1 else rap
+    text = (f"🎩 <b>{esc(iname)}</b>" + (f" (<code>{acronym}</code>)" if acronym else "") + "\n"
+            f"🆔 <b>Asset ID</b>: <code>{found_id}</code>\n\n"
+            f"💵 <b>RAP</b>: <code>{rap:,}</code>\n"
+            f"💎 <b>Value</b>: <code>{val:,}</code>\n")
+    kb = InlineKeyboardMarkup(inline_keyboard=[[
+        InlineKeyboardButton(text="🌐 Roblox", url=f"https://www.roblox.com/catalog/{found_id}"),
+        InlineKeyboardButton(text="📊 Rolimons", url=f"https://www.rolimons.com/item/{found_id}")
+    ]])
+    thumb = await roblox.get_asset_thumbnail(int(found_id))
+    if thumb: await message.answer_photo(thumb, caption=text, reply_markup=kb)
+    else: await message.answer(text, reply_markup=kb)
 async def main():
     await dp.start_polling(
         bot,
@@ -3142,55 +3255,3 @@ async def main():
 
 if __name__ == "__main__":
     asyncio.run(main())
-
-@dp.message(Command("item"))
-@track_command
-async def cmd_item(message, command: CommandObject):
-    lang = get_lang(message)
-    arg = (command.args or "").strip()
-    if not arg: return await message.answer("/item <name/acronym/id>")
-    
-    roli_items = await roli_get_items()
-    found_id = None
-    found_data = None
-    
-    # Search logic
-    if arg.isdigit():
-        found_id = arg
-        found_data = roli_items.get(arg)
-    else:
-        arg_lower = arg.lower()
-        for iid, idata in roli_items.items():
-            if str(idata[1]).lower() == arg_lower or str(idata[0]).lower() == arg_lower or arg_lower in str(idata[0]).lower():
-                found_id = iid
-                found_data = idata
-                break
-                
-    if not found_id or not found_data:
-        return await message.answer("❌ Item not found.")
-
-    iname, acronym, rap, val, demand, trend, proj, rare = found_data[:8]
-    val = val if val != -1 else rap
-    
-    demand_map = {-1: "N/A", 0: "Terrible", 1: "Low", 2: "Normal", 3: "High", 4: "Amazing"}
-    trend_map = {-1: "N/A", 0: "Lowering", 1: "Unstable", 2: "Stable", 3: "Raising", 4: "Fluctuating"}
-
-    text = (f"🎩 <b>{esc(iname)}</b>" + (f" (<code>{acronym}</code>)" if acronym else "") + "\n"
-            f"🆔 <b>Asset ID</b>: <code>{found_id}</code>\n\n"
-            f"💵 <b>RAP</b>: <code>{rap:,}</code>\n"
-            f"💎 <b>Value</b>: <code>{val:,}</code>\n"
-            f"📊 <b>Demand</b>: <code>{demand_map.get(demand, 'N/A')}</code>\n"
-            f"📈 <b>Trend</b>: <code>{trend_map.get(trend, 'N/A')}</code>\n")
-    
-    if proj == 1: text += "⚠️ <b>Projected</b>: <code>Yes</code>\n"
-    if rare == 1: text += "💠 <b>Rare</b>: <code>Yes</code>\n"
-    
-    kb = InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="🌐 Roblox", url=f"https://www.roblox.com/catalog/{found_id}"),
-         InlineKeyboardButton(text="📊 Rolimons", url=f"https://www.rolimons.com/item/{found_id}")],
-        [InlineKeyboardButton(text="📢 Trade Ads", url=f"https://www.rolimons.com/itemtrades/{found_id}")]
-    ])
-    
-    thumb = await roblox.get_asset_thumbnail(int(found_id))
-    if thumb: await message.answer_photo(thumb, caption=text, reply_markup=kb)
-    else: await message.answer(text, reply_markup=kb)
