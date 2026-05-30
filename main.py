@@ -448,18 +448,18 @@ class RobloxAPI:
             pass
     
         try:
-            data = await self.req(
-                "GET",
-                f"https://catalog.roblox.com/v1/catalog/items/details",
-                json={"items": [{"itemType": "Asset", "id": aid}]},
-                method="POST"
-            )
+            data = await self.req("POST", "https://catalog.roblox.com/v1/catalog/items/details", json={"items": [{"itemType": "Asset", "id": aid}]})
             if data and data.get("data"):
                 return data["data"][0]
         except RuntimeError:
             pass
     
         return None
+
+    async def get_group_icon(self, gid: int):
+        url = f"https://thumbnails.roblox.com/v1/groups/icons?groupIds={gid}&size=150x150&format=Png&isCircular=false"
+        data = await self.req("GET", url)
+        return data["data"][0]["imageUrl"] if data and data.get("data") else None
 
     async def get_group_by_id(self, gid: int):
         return await self.req("GET", f"https://groups.roblox.com/v1/groups/{gid}")
@@ -2075,7 +2075,7 @@ async def cmd_friends(message, command: CommandObject):
     else:
         lines = [f"👥 <b>Friends of {esc(base['name'])}:</b>"]
     for f in data[:25]:
-        name = esc(f.get("name", "Unknown"))
+        name = esc(f.get("name") or f.get("username") or f.get("displayName") or "Unknown")
         fid = f.get("id")
         lines.append(f"• {name} (<code>{fid}</code>)")
     await message.answer("\n".join(lines))
@@ -2109,7 +2109,7 @@ async def cmd_followers(message, command: CommandObject):
     else:
         lines = [f"⭐️ <b>Followers of {esc(base['name'])}:</b>"]
     for f in data[:25]:
-        name = esc(f.get("name", "Unknown"))
+        name = esc(f.get("name") or f.get("username") or f.get("displayName") or "Unknown")
         fid = f.get("id")
         lines.append(f"• {name} (<code>{fid}</code>)")
     await message.answer("\n".join(lines))
@@ -2143,7 +2143,7 @@ async def cmd_followings(message, command: CommandObject):
     else:
         lines = [f"➡️ <b>Followings of {esc(base['name'])}:</b>"]
     for f in data[:25]:
-        name = esc(f.get("name", "Unknown"))
+        name = esc(f.get("name") or f.get("username") or f.get("displayName") or "Unknown")
         fid = f.get("id")
         lines.append(f"• {name} (<code>{fid}</code>)")
     await message.answer("\n".join(lines))
@@ -3013,6 +3013,11 @@ async def inline_handler(query: InlineQuery):
             found_id = None
             found_data = None
 
+            # Acronym search
+            items_data = await roli_get_items()
+            for iid, details in (items_data or {}).items():
+                if isinstance(details, dict) and str(details.get("acronym") or "").lower() == arg.lower():
+                    arg = iid; break
             if arg.isdigit():
                 found_id = arg
                 found_data = roli_items.get(arg) if roli_items else None
