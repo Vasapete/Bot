@@ -479,26 +479,20 @@ class RobloxAPI:
             return []
         return data.get("data", [])
 
+
+    async def get_social_list(self, uid: int, stype: str, limit: int = 100):
+        url = f'https://friends.roblox.com/v1/users/{uid}/{stype}?limit={limit}'
+        data = await self.req('GET', url)
+        return data.get('data', []) if data else []
+
     async def get_friends(self, uid: int):
-        data = await self.req(
-            "GET",
-            f"https://friends.roblox.com/v1/users/{uid}/friends?limit=50",
-        )
-        return data.get("data", []) if data else []
+        return await self.get_social_list(uid, 'friends')
 
     async def get_followers(self, uid: int):
-        data = await self.req(
-            "GET",
-            f"https://friends.roblox.com/v1/users/{uid}/followers?limit=50",
-        )
-        return data.get("data", []) if data else []
+        return await self.get_social_list(uid, 'followers')
 
     async def get_followings(self, uid: int):
-        data = await self.req(
-            "GET",
-            f"https://friends.roblox.com/v1/users/{uid}/followings?limit=50",
-        )
-        return data.get("data", []) if data else []
+        return await self.get_social_list(uid, 'followings')
 
     async def get_collectibles(self, uid: int):
         from urllib.parse import urlencode
@@ -556,14 +550,19 @@ ROLI_ITEMS_CACHE: Optional[Dict[str, list]] = None
 async def roli_ensure():
     global ROLI_SESSION
     if ROLI_SESSION is None or ROLI_SESSION.closed:
-        ROLI_SESSION = aiohttp.ClientSession(
+                ROLI_SESSION = aiohttp.ClientSession(
             timeout=ClientTimeout(total=15),
             headers={
-                "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
-                "Accept": "application/json, text/plain, */*",
+                "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36",
+                "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.7",
                 "Accept-Language": "en-US,en;q=0.9",
                 "Referer": "https://www.rolimons.com/",
                 "Origin": "https://www.rolimons.com",
+                "Sec-Fetch-Dest": "document",
+                "Sec-Fetch-Mode": "navigate",
+                "Sec-Fetch-Site": "none",
+                "Sec-Fetch-User": "?1",
+                "Upgrade-Insecure-Requests": "1"
             }
         )
     return ROLI_SESSION
@@ -845,7 +844,64 @@ async def cmd_help(message, command: CommandObject):
 
 
 @dp.message(Command("user"))
-@track_command
+async def format_user_profile(uid: int, lang: str):
+    user, friends_c, followers_c, following_c, roli_data, presence, thumb_url = await asyncio.gather(
+        roblox.get_user_by_id(uid),
+        roblox.get_social_count(uid, "friends"),
+        roblox.get_social_count(uid, "followers"),
+        roblox.get_social_count(uid, "followings"),
+        roli_get(f"https://www.rolimons.com/playerapi/player/{uid}"),
+        roblox.get_presence([uid]),
+        roblox.get_user_thumbnail(uid, "bust"),
+        return_exceptions=True
+    )
+    
+    if not user or isinstance(user, Exception):
+        return ("User not found." if lang != "ru" else "Пользователь не найден."), None
+
+    # Presence
+    pres_map = {0: "⚫ Offline", 1: "🌐 Online", 2: "🎮 Playing", 3: "🔧 Studio"}
+    pres_val = 0
+    if isinstance(presence, dict):
+        p_list = presence.get("userPresences", [])
+        if p_list:
+            p = p_list[0]
+            pres_val = p.get("userPresenceType", 0)
+            if pres_val == 0 and (p.get("lastLocation") == "Website" or "Website" in str(p.get("lastLocation", ""))):
+                pres_val = 1
+    pres_text = pres_map.get(pres_val, "⚫ Offline")
+
+    # Roli stats (ROOT PARSING)
+    rap = value = "N/A"
+    inv_public = True
+    if isinstance(roli_data, dict):
+        rv = roli_data.get('value')
+        rp = roli_data.get('rap')
+        rap = f"{rp:,}" if rp is not None else "0"
+        value = f"{rv:,}" if rv is not None and rv != -1 else rap
+        inv_public = not roli_data.get("privacy_enabled", False)
+
+    created_dt = parse_iso8601(user["created"])
+    created_str = created_dt.strftime("%Y-%m-%d")
+    
+    followers_str = compress_number(followers_c) if isinstance(followers_c, int) else "0"
+
+    text = (
+        f"👤 <b>{esc(user['name'])}</b> (@{esc(user.get('displayName', user['name']))})\n"
+        f"<b>{friends_c if isinstance(friends_c, int) else 0}</b> Friends | <b>{followers_str}</b> Followers | <b>{following_c if isinstance(following_c, int) else 0}</b> Following\n\n"
+        f"🆔 <b>ID</b>: <code>{uid}</code>\n"
+        f"✅ <b>Verified</b>: <code>{user.get('hasVerifiedBadge', False)}</code>\n"
+        f"📦 <b>Inventory</b>: <a href='https://www.roblox.com/users/{uid}/inventory'>{'Public' if inv_public else 'Private'}</a>\n"
+        f"💰 <b>RAP</b>: <code>{rap}</code>\n"
+        f"💎 <b>Value</b>: <code>{value}</code>\n"
+        f"📅 <b>Created</b>: <code>{created_str}</code>\n"
+        f"📡 <b>Status</b>: {pres_text}"
+    )
+    desc = esc((user.get("description") or "").strip()[:300])
+    if desc: text += f"\n\n📜 <i>{desc}</i>"
+    
+    return text, (thumb_url if isinstance(thumb_url, str) else None)
+
 async def cmd_user(message, command: CommandObject):
     lang = get_lang(message)
     name = (command.args or "").strip()
@@ -2077,7 +2133,7 @@ async def cmd_friends(message, command: CommandObject):
     for f in data[:25]:
         name = esc(f.get("name") or f.get("username") or f.get("displayName") or "Unknown")
         fid = f.get("id")
-        lines.append(f"• <a href='https://www.roblox.com/users/{fid}/profile'>{name}</a> (<code>{fid}</code>)")
+        lines.append(f"• <a href=\'https://www.roblox.com/users/{fid}/profile\'>{esc(fname)}</a> (<code>{fid}</code>)")
     await message.answer("\n".join(lines))
 
 
@@ -2111,7 +2167,7 @@ async def cmd_followers(message, command: CommandObject):
     for f in data[:25]:
         name = esc(f.get("name") or f.get("username") or f.get("displayName") or "Unknown")
         fid = f.get("id")
-        lines.append(f"• <a href='https://www.roblox.com/users/{fid}/profile'>{name}</a> (<code>{fid}</code>)")
+        lines.append(f"• <a href=\'https://www.roblox.com/users/{fid}/profile\'>{esc(fname)}</a> (<code>{fid}</code>)")
     await message.answer("\n".join(lines))
 
 
@@ -2145,7 +2201,7 @@ async def cmd_followings(message, command: CommandObject):
     for f in data[:25]:
         name = esc(f.get("name") or f.get("username") or f.get("displayName") or "Unknown")
         fid = f.get("id")
-        lines.append(f"• <a href='https://www.roblox.com/users/{fid}/profile'>{name}</a> (<code>{fid}</code>)")
+        lines.append(f"• <a href=\'https://www.roblox.com/users/{fid}/profile\'>{esc(fname)}</a> (<code>{fid}</code>)")
     await message.answer("\n".join(lines))
 
 
